@@ -87,3 +87,10 @@ export {
   verifyClaimAgainstSources,
   calculateCredibilityWithSources,
 } from "./truth-engine.js";
+export { createOpenCodeMonitor } from "./opencode-monitor.js";
+export type {
+  OpenCodeMonitor,
+  OpenCodeMessage,
+  OpenCodeToolCall,
+  OpenCodeMonitorConfig,
+} from "./opencode-monitor.js";

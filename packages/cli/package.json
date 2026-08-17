@@ -16,6 +16,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "@tooloftruth/core": "workspace:*",
     "tsup": "^8.4.0",
     "typescript": "^5.7.0"
   }

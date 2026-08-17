@@ -2,14 +2,27 @@
 import { watch, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { appendFileSync } from "fs";
+import { createOpenCodeMonitor } from "@tooloftruth/core";
 
 const TOOLOFTRUTH_DIR = process.env.TOOLOFTRUTH_DIR || join(homedir(), ".tooloftruth");
 const RECEIPTS_DIR = join(TOOLOFTRUTH_DIR, "receipts");
 const STATS_DIR = join(TOOLOFTRUTH_DIR, "stats");
+const CONVERSATIONS_DIR = join(TOOLOFTRUTH_DIR, "conversations");
 const POLL_MS = Number(process.env.TOOLOFTRUTH_POLL_MS || 60000);
 
 if (!existsSync(RECEIPTS_DIR)) mkdirSync(RECEIPTS_DIR, { recursive: true });
 if (!existsSync(STATS_DIR)) mkdirSync(STATS_DIR, { recursive: true });
+if (!existsSync(CONVERSATIONS_DIR)) mkdirSync(CONVERSATIONS_DIR, { recursive: true });
+
+function convFile(): string {
+  const date = new Date().toISOString().slice(0, 10);
+  return join(CONVERSATIONS_DIR, `${date}.jsonl`);
+}
+
+function logConversation(entry: Record<string, unknown>) {
+  appendFileSync(convFile(), JSON.stringify(entry) + "\n");
+}
 
 interface Summary {
   windowStart: string;
@@ -83,9 +96,82 @@ function runOnce() {
   }
 }
 
+// ─── OpenCode conversation monitor ────────────────────────────
+let opencodeMonitor: ReturnType<typeof createOpenCodeMonitor> | null = null;
+
+async function initOpenCodeMonitor() {
+  try {
+    opencodeMonitor = createOpenCodeMonitor({});
+    await opencodeMonitor.open();
+    console.error("[tooloftruth:daemon] OpenCode monitor connected (opencode.db)");
+  } catch (e) {
+    console.error(`[tooloftruth:daemon] OpenCode monitor unavailable: ${(e as Error).message}`);
+  }
+}
+
+async function pollOpenCode() {
+  if (!opencodeMonitor) return;
+  try {
+    const msgs = await opencodeMonitor.pollNewMessages();
+    for (const msg of msgs) {
+      const entry: Record<string, unknown> = {
+        id: `oc_${msg.id}`,
+        timestamp: new Date(msg.timeCreated).toISOString(),
+        sessionId: `opencode_${msg.sessionId}`,
+        type: msg.role === "user" ? "observation" : "result",
+        content: (msg.text || `[${msg.role}]`).slice(0, 500),
+        role: msg.role,
+        model: msg.modelID,
+        costUsd: msg.cost,
+        tokens: msg.tokens,
+        toolCalls: msg.toolCalls,
+      };
+      logConversation(entry);
+
+      // Also log tool calls as receipts so fabrication audit covers them
+      for (const tc of msg.toolCalls) {
+        const date = new Date().toISOString().slice(0, 10);
+        const receipt = {
+          id: `call_oc_${msg.id}_${tc.callID || tc.tool}`,
+          timestamp: new Date(msg.timeCreated).toISOString(),
+          tool: tc.tool,
+          server: "opencode",
+          sessionId: `opencode_${msg.sessionId}`,
+          userPrompt: msg.text?.slice(0, 200) || "",
+          params: tc.input || {},
+          result: tc.outputPreview ? { output: tc.outputPreview } : {},
+          durationMs: tc.durationMs || 0,
+          isError: !!tc.isError,
+          tokens: msg.tokens,
+          costUsd: 0,
+          verification: {
+            schemaValid: true,
+            responsePlausible: !tc.isError,
+            trustScore: tc.isError ? 50 : 95,
+            verdict: tc.isError ? "SUSPICIOUS" : "VERIFIED",
+            fabricationConfidence: 0,
+            checksPerformed: ["opencode_monitor"],
+          },
+        };
+        appendFileSync(join(RECEIPTS_DIR, `${date}.jsonl`), JSON.stringify(receipt) + "\n");
+      }
+    }
+    if (msgs.length > 0) {
+      console.error(`[tooloftruth:daemon] +${msgs.length} opencode messages, ${msgs.reduce((s, m) => s + m.toolCalls.length, 0)} tool calls`);
+    }
+  } catch (e) {
+    console.error(`[tooloftruth:daemon] opencode poll error: ${(e as Error).message}`);
+  }
+}
+
 console.error(`[tooloftruth:daemon] Watching ${RECEIPTS_DIR} (poll ${POLL_MS}ms)`);
 runOnce();
 setInterval(runOnce, POLL_MS);
+
+initOpenCodeMonitor().then(() => {
+  pollOpenCode();
+  setInterval(pollOpenCode, Math.max(5000, POLL_MS / 2));
+});
 
 const unwatch = watch(RECEIPTS_DIR, (event, filename) => {
   if (filename && filename.endsWith(".jsonl")) runOnce();
