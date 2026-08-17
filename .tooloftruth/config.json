@@ -1,0 +1,7 @@
+{
+  "tooloftruth_version": "0.1.0",
+  "retention_days": 90,
+  "max_file_size_mb": 50,
+  "compress_old": true,
+  "sessions": {}
+}

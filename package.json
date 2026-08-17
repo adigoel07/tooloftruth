@@ -1,0 +1,25 @@
+{
+  "name": "tooloftruth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Every tool call, proven. — Verification sentinel for AI agent tool usage.",
+  "license": "MIT",
+  "author": "adigoel07",
+  "repository": "https://github.com/adigoel07/tooloftruth",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm -r --parallel dev",
+    "clean": "pnpm -r clean",
+    "test": "vitest",
+    "lint": "eslint packages/*/src"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.0",
+    "tsup": "^8.4.0",
+    "eslint": "^9.0.0"
+  }
+}

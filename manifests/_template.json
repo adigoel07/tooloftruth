@@ -1,0 +1,19 @@
+{
+  "$schema": "https://tooloftruth.dev/schemas/manifest-v1.json",
+  "skill": "<skill-name>",
+  "version": "1.0.0",
+  "requires": {
+    "<server-name>": {
+      "tool": "<tool-name>",
+      "must_be_called": true,
+      "expected_args": {},
+      "max_cost": 0.0
+    }
+  },
+  "order": ["<server-name>"],
+  "output_rules": [
+    "Describe what the output should contain",
+    "List any constraints on the result"
+  ],
+  "max_cost_usd": 0.10
+}

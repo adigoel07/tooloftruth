@@ -1,0 +1,24 @@
+{
+  "name": "tooloftruth-mcp",
+  "version": "0.1.0",
+  "description": "Tool of Truth MCP Server — verification sentinel for AI agent tool usage",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "tooloftruth-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "dev": "tsup src/index.ts --format esm --dts --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@tooloftruth/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.12.1"
+  },
+  "devDependencies": {
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0"
+  }
+}
