@@ -28,6 +28,7 @@ The following are **wired and verified on this machine**, not just designed:
 - **Receipts**: live in `~/.tooloftruth/receipts/*.jsonl`; index.json tracks totals (11+ calls recorded).
 - **Conversation logger**: claims/actions persisted to `~/.tooloftruth/conversations/*.jsonl`.
 - **Daemon**: `com.tooloftruth.daemon` loaded in launchd (PID live), KeepAlive, polls receipts → aggregates stats to `~/.tooloftruth/stats/YYYY-MM-DD.json`. Runs the **built** `monitor.js` (no experimental flags).
+- **Continuous conversation monitoring (LIVE)**: the daemon tails `opencode.db` (SQLite) and logs every agent message + tool call as conversation entries and receipts (server=`opencode`). Verified: caught this session's live messages + `bash` tool call (VERIFIED). This closes the "can't see your chats" gap — real conversations ARE now monitored for truthfulness.
 - **Truth Scan**: Bing-html search via curl (DDG blocks curl) → decode Bing redirects → crawl4ai `crwl` fetch → evidence extraction → verdict.
 - **Tests**: 72/72 passing (vitest), core features verified. Fabrication detector fixed to not flag sub-ms local stdio tools (verified: proxied echo → VERIFIED/100, not SUSPICIOUS).
 - **Release-readiness**: all 3 packages (`@tooloftruth/core`, `tooloftruth-mcp`, `tooloftruth`) pack cleanly, consumer-install from tarball verified (95 pkgs, 0 vulns). MCP server spawns + CLI `status` works from a clean `npm install`. Core bundled into mcp (`noExternal`) so no runtime `workspace:` dep leak.
