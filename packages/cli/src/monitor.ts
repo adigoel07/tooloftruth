@@ -3,17 +3,20 @@ import { watch, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync 
 import { join } from "path";
 import { homedir } from "os";
 import { appendFileSync } from "fs";
-import { createOpenCodeMonitor } from "@tooloftruth/core";
+import { createOpenCodeMonitor, scanForSensitiveData } from "@tooloftruth/core";
+import type { Detection } from "@tooloftruth/core";
 
 const TOOLOFTRUTH_DIR = process.env.TOOLOFTRUTH_DIR || join(homedir(), ".tooloftruth");
 const RECEIPTS_DIR = join(TOOLOFTRUTH_DIR, "receipts");
 const STATS_DIR = join(TOOLOFTRUTH_DIR, "stats");
 const CONVERSATIONS_DIR = join(TOOLOFTRUTH_DIR, "conversations");
+const ALERTS_DIR = join(TOOLOFTRUTH_DIR, "alerts");
 const POLL_MS = Number(process.env.TOOLOFTRUTH_POLL_MS || 60000);
 
 if (!existsSync(RECEIPTS_DIR)) mkdirSync(RECEIPTS_DIR, { recursive: true });
 if (!existsSync(STATS_DIR)) mkdirSync(STATS_DIR, { recursive: true });
 if (!existsSync(CONVERSATIONS_DIR)) mkdirSync(CONVERSATIONS_DIR, { recursive: true });
+if (!existsSync(ALERTS_DIR)) mkdirSync(ALERTS_DIR, { recursive: true });
 
 function convFile(): string {
   const date = new Date().toISOString().slice(0, 10);
@@ -22,6 +25,38 @@ function convFile(): string {
 
 function logConversation(entry: Record<string, unknown>) {
   appendFileSync(convFile(), JSON.stringify(entry) + "\n");
+}
+
+function alertsFile(): string {
+  const date = new Date().toISOString().slice(0, 10);
+  return join(ALERTS_DIR, `${date}.jsonl`);
+}
+
+function logAlert(detection: Detection, sourceDetail: string) {
+  const entry = {
+    id: detection.id,
+    timestamp: new Date().toISOString(),
+    severity: detection.severity,
+    category: detection.category,
+    rule: detection.rule,
+    source: detection.source,
+    sourceDetail,
+    matchRedacted: detection.matchRedacted,
+    confidence: detection.confidence,
+    requiresReview: detection.requiresReview,
+    context: detection.context,
+  };
+  appendFileSync(alertsFile(), JSON.stringify(entry) + "\n");
+  const flag = detection.severity === "critical" ? "🔴" : detection.severity === "warning" ? "🟡" : "ℹ️";
+  console.error(`[tooloftruth:daemon] ${flag} ${detection.category}:${detection.rule} (${detection.severity}) — ${detection.matchRedacted} @ ${detection.source}`);
+}
+
+function scanText(text: string, source: string) {
+  if (!text || text.length < 3) return;
+  const result = scanForSensitiveData(text, source);
+  for (const det of result.detections) {
+    logAlert(det, source);
+  }
 }
 
 interface Summary {
@@ -128,6 +163,11 @@ async function pollOpenCode() {
       };
       logConversation(entry);
 
+      // Scan message text for sensitive data
+      if (msg.text) {
+        scanText(msg.text, `message:${msg.id}`);
+      }
+
       // Also log tool calls as receipts so fabrication audit covers them
       for (const tc of msg.toolCalls) {
         const date = new Date().toISOString().slice(0, 10);
@@ -154,6 +194,11 @@ async function pollOpenCode() {
           },
         };
         appendFileSync(join(RECEIPTS_DIR, `${date}.jsonl`), JSON.stringify(receipt) + "\n");
+
+        // Scan tool call input (args/commands) for sensitive data + dangerous commands
+        if (tc.input) {
+          scanText(JSON.stringify(tc.input), `tool:${tc.tool}`);
+        }
       }
     }
     if (msgs.length > 0) {

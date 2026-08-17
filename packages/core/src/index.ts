@@ -94,3 +94,24 @@ export type {
   OpenCodeToolCall,
   OpenCodeMonitorConfig,
 } from "./opencode-monitor.js";
+export {
+  scanForSensitiveData,
+  formatDetection,
+  formatScanResult,
+} from "./detectors.js";
+export type {
+  Detection,
+  DetectionCategory,
+  DetectionSeverity,
+  ScanResult,
+  ScanOptions2,
+} from "./detectors.js";
+export {
+  gitleaksAvailable,
+  runGitleaksScan,
+  formatGitleaksFindings,
+} from "./gitleaks.js";
+export type {
+  GitleaksFinding,
+  GitleaksScanResult,
+} from "./gitleaks.js";

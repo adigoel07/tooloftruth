@@ -564,6 +564,98 @@ server.tool(
 );
 
 server.tool(
+  "tooloftruth_alerts",
+  "List sensitive-data alerts (PII, secrets, prompt injection, dangerous commands) detected by the daemon",
+  {
+    limit: z.number().default(20).describe("Max alerts to return"),
+    severity: z.enum(["critical", "warning", "info"]).optional().describe("Filter by severity"),
+    category: z.enum(["secret", "pii", "prompt_injection", "dangerous_command"]).optional().describe("Filter by category"),
+  },
+  async ({ limit, severity, category }) => {
+    const { readdirSync, readFileSync } = await import("fs");
+    const alertsDir = join(TOOLOFTRUTH_DIR, "alerts");
+    let alerts: Record<string, unknown>[] = [];
+    try {
+      const files = readdirSync(alertsDir).filter((f) => f.endsWith(".jsonl")).sort().reverse();
+      for (const f of files) {
+        const lines = readFileSync(join(alertsDir, f), "utf-8").split("\n").filter(Boolean);
+        for (const line of lines) {
+          try {
+            const entry = JSON.parse(line);
+            if (severity && entry.severity !== severity) continue;
+            if (category && entry.category !== category) continue;
+            alerts.push(entry);
+          } catch {}
+        }
+        if (alerts.length >= limit) break;
+      }
+    } catch {
+      alerts = [];
+    }
+
+    const summary = alerts.slice(0, limit);
+    const counts = alerts.reduce((acc, a) => {
+      acc[a.category as string] = (acc[a.category as string] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify(
+            {
+              total: alerts.length,
+              byCategory: counts,
+              alerts: summary.map((a) => ({
+                severity: a.severity,
+                category: a.category,
+                rule: a.rule,
+                matchRedacted: a.matchRedacted,
+                source: a.source,
+                timestamp: a.timestamp,
+                confidence: a.confidence,
+                requiresReview: a.requiresReview,
+                context: a.context,
+              })),
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  }
+);
+
+server.tool(
+  "tooloftruth_gitleaks",
+  "Deep-scan a git repo for secrets using gitleaks (200+ rules). Returns findings with exact file/line proof.",
+  {
+    repoPath: z.string().describe("Absolute path to the git repo to scan"),
+    noGit: z.boolean().optional().describe("Scan a directory without git history (gitleaks dir)"),
+  },
+  async ({ repoPath, noGit }) => {
+    const { gitleaksAvailable, runGitleaksScan, formatGitleaksFindings } = await import("@tooloftruth/core");
+    if (!gitleaksAvailable()) {
+      return {
+        content: [{ type: "text" as const, text: "gitleaks not installed. Run `brew install gitleaks` first." }],
+      };
+    }
+    const result = runGitleaksScan(repoPath, { noGit });
+    const summary = {
+      available: result.available,
+      findingCount: result.findings.length,
+      scannedAt: result.scannedAt,
+      report: formatGitleaksFindings(result),
+    };
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(summary, null, 2) }],
+    };
+  }
+);
+
+server.tool(
   "tooloftruth_truth_scan",
   "Scan text for factual claims, verify them against real web sources using Crawl4AI, and produce a truth report with scientific framework analysis",
   {
