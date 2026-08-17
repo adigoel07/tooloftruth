@@ -15,7 +15,9 @@ export type DetectionCategory =
   | "secret"
   | "pii"
   | "prompt_injection"
-  | "dangerous_command";
+  | "dangerous_command"
+  | "filesystem_action"
+  | "install_action";
 
 export type DetectionSeverity = "critical" | "warning" | "info";
 
@@ -446,6 +448,124 @@ const DANGEROUS_PATTERNS: Array<{
     confidence: 0.7,
   },
 ];
+
+// ─── Layer 5: Filesystem actions (installs, writes, deletes, dup) ──
+
+export interface FsActionDetection {
+  action: "install" | "write" | "delete" | "duplicate" | "chmod" | "network_write";
+  rule: string;
+  target?: string;
+  detail: string;
+  severity: DetectionSeverity;
+  confidence: number;
+}
+
+const INSTALL_RE = /\b(?:brew\s+install|pip\s+install|pip3\s+install|npm\s+(?:i|install|add)|pnpm\s+add|yarn\s+add|gem\s+install|go\s+get|cargo\s+install|apt(-get)?\s+install|dnf\s+install|docker\s+pull)\b/i;
+const DELETE_RE = /\b(?:rm\s+(?:-[a-zA-Z]*\s+)?|rmdir\s+|unlink\s+)(?:[\w./~-]+(?:\s|$))/;
+const COPY_RE = /\b(?:cp|cp\s+-r|cp\s+-a|rsync|scp|ditto)\s+(?:-[a-zA-Z]+\s+)?(\S+)\s+(\S+)/;
+const WRITE_RE = /\b(?:cat\s*>|>>|mv\s+|install\s+-m|printf\s+.*>\s*|echo\s+.*>>\s*)\S+/;
+const CHMOD_RE = /\bchmod\s+[0-7]{3}\s+\S+/;
+const NETWORK_WRITE_RE = /\b(?:curl|wget)\s+.*-o\s+\S+|git\s+clone\s+\S+/;
+
+export function detectFilesystemActions(
+  tool: string,
+  input: Record<string, unknown> | undefined,
+  command?: string
+): FsActionDetection[] {
+  const out: FsActionDetection[] = [];
+  if (!input) return out;
+  const text = command || JSON.stringify(input);
+
+  // 1. Explicit write tool
+  if (tool === "write" && typeof input.filePath === "string") {
+    out.push({
+      action: "write",
+      rule: "tool_write",
+      target: input.filePath as string,
+      detail: `Wrote file via write tool: ${input.filePath}`,
+      severity: "info",
+      confidence: 0.98,
+    });
+  }
+  // 2. Edit tool
+  if (tool === "edit" && typeof input.filePath === "string") {
+    out.push({
+      action: "write",
+      rule: "tool_edit",
+      target: input.filePath as string,
+      detail: `Edited file: ${input.filePath}`,
+      severity: "info",
+      confidence: 0.98,
+    });
+  }
+  // 3. Delete command
+  if ((tool === "bash" || tool === "shell") && DELETE_RE.test(text)) {
+    const m = text.match(/\b(?:rm\s+(?:-[a-zA-Z]*\s+)?|rmdir\s+|unlink\s+)([\w./~-]+)/);
+    out.push({
+      action: "delete",
+      rule: "shell_rm",
+      target: m?.[1] || "?",
+      detail: `Delete command: ${text.slice(0, 80)}`,
+      severity: m?.[1]?.startsWith("/") ? "warning" : "info",
+      confidence: 0.85,
+    });
+  }
+  // 4. Install command
+  if (INSTALL_RE.test(text)) {
+    const m = text.match(/(?:install|add|get|pull)\s+(\S+)/);
+    out.push({
+      action: "install",
+      rule: "shell_install",
+      target: m?.[1] || "?",
+      detail: `Install command: ${text.slice(0, 80)}`,
+      severity: "warning",
+      confidence: 0.9,
+    });
+  }
+  // 5. Copy / duplication
+  if (COPY_RE.test(text)) {
+    const m = text.match(/\b(?:cp|cp\s+-r|cp\s+-a|rsync|scp|ditto)\s+(?:-[a-zA-Z]+\s+)?(\S+)\s+(\S+)/);
+    out.push({
+      action: "duplicate",
+      rule: "shell_copy",
+      target: `${m?.[1]} → ${m?.[2]}`,
+      detail: `File duplication: ${m?.[1]} → ${m?.[2]}`,
+      severity: "info",
+      confidence: 0.8,
+    });
+  }
+  // 6. chmod
+  if (CHMOD_RE.test(text)) {
+    const m = text.match(/\bchmod\s+([0-7]{3})\s+(\S+)/);
+    out.push({
+      action: "chmod",
+      rule: "shell_chmod",
+      target: m?.[2] || "?",
+      detail: `chmod ${m?.[1]} ${m?.[2] || "?"}`,
+      severity: "info",
+      confidence: 0.85,
+    });
+  }
+  // 7. Network write (downloads/clones)
+  if (NETWORK_WRITE_RE.test(text)) {
+    const m = text.match(/\b(?:curl|wget)\s+.*-o\s+(\S+)|git\s+clone\s+(\S+)/);
+    out.push({
+      action: "network_write",
+      rule: "shell_download",
+      target: m?.[1] || m?.[2] || "?",
+      detail: `Download/clone: ${text.slice(0, 80)}`,
+      severity: "info",
+      confidence: 0.8,
+    });
+  }
+
+  return out;
+}
+
+export function formatFsAction(d: FsActionDetection): string {
+  const flag = d.severity === "warning" ? "🟡" : d.severity === "critical" ? "🔴" : "ℹ️";
+  return `${flag} [${d.action}:${d.rule}] ${d.severity.toUpperCase()} — ${d.detail}${d.target ? ` → ${d.target}` : ""}`;
+}
 
 // ─── Scan engine ─────────────────────────────────────────────
 

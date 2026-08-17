@@ -5,6 +5,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { execSync } from "child_process";
 import { DASHBOARD_HTML } from "./dashboard-html.js";
+import { loadSessionMap, loadAlertConfig, updateAlertConfig, formatAlertConfig } from "@tooloftruth/core";
 
 // Tool of Truth — local dashboard server (folded into CLI package)
 // Reads ~/.tooloftruth/* and serves a single-file, zero-dep dashboard.
@@ -66,6 +67,7 @@ function apiData(): any {
     conversations,
     stats,
     ledger,
+    sessions: loadSessionMap(TOOLOFTRUTH_DIR).sessions,
     index: readFileOrNull("index.json") ? JSON.parse(readFileOrNull("index.json")!) : null,
     proxy: readFileOrNull("proxy.json") ? JSON.parse(readFileOrNull("proxy.json")!) : null,
     latestAlert: readFileOrNull("alerts/latest-alert.txt"),
@@ -73,15 +75,55 @@ function apiData(): any {
 }
 
 export function startDashboardServer(port: number = PORT): void {
-  const server = createServer((req, res) => {
-    const url = (req.url || "/").split("?")[0];
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
+const server = createServer((req, res) => {
+  const url = (req.url || "/").split("?")[0];
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
-    if (url === "/api/data") {
+  // ─── Alert config: GET (view) / POST (update) ─────────────
+  if (url === "/api/alerts-config") {
+    if (req.method === "POST") {
+      let body = "";
+      req.on("data", (c) => { body += c; });
+      req.on("end", () => {
+        try {
+          const input = JSON.parse(body || "{}");
+          const updated = updateAlertConfig(input, TOOLOFTRUTH_DIR);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(updated));
+        } catch {
+          res.writeHead(400); res.end(JSON.stringify({ error: "invalid body" }));
+        }
+      });
+      return;
+    }
+    const cfg = loadAlertConfig(TOOLOFTRUTH_DIR);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(cfg));
+    return;
+  }
+
+  if (url === "/api/data") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(apiData()));
+      return;
+    }
+
+    if (url === "/api/session") {
+      // ?id=<sessionId> → return every record for that session across stores
+      const id = decodeURIComponent((req.url || "").split("=")[1] || "");
+      const data = apiData();
+      const canonical = id.startsWith("opencode_") ? id.slice("opencode_".length) : id;
+      const convs = data.conversations.filter((c: any) => {
+        const sid = (c.sessionId || "").startsWith("opencode_") ? c.sessionId.slice("opencode_".length) : c.sessionId;
+        return sid === canonical || c.sessionId === id;
+      });
+      const receipts = data.receipts.filter((r: any) => r.sessionId === id || r.sessionId === `opencode_${canonical}`);
+      const ledger = data.ledger[canonical] || data.ledger[`opencode_${canonical}`] || null;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ sessionId: id, conversations: convs, receipts, ledger }));
       return;
     }
 
@@ -127,7 +169,9 @@ export function startDashboardServer(port: number = PORT): void {
 }
 
 // Direct execution: `node server.js` or `tooloftruth dashboard`
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/^file:\/\//, ""));
-if (isMain || process.env.TOOLOFTRUTH_START_DASHBOARD === "1") {
+const isMain =
+  (process.argv[1] && /dashboard-server(\.js)?$/.test(process.argv[1])) ||
+  process.env.TOOLOFTRUTH_START_DASHBOARD === "1";
+if (isMain) {
   startDashboardServer(PORT);
 }

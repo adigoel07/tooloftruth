@@ -10,6 +10,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
 import { startDashboardServer } from "./dashboard-server.js";
+import { loadAlertConfig, updateAlertConfig, formatAlertConfig } from "@tooloftruth/core";
 
 const BASE_DIR = join(homedir(), ".tooloftruth");
 const RECEIPTS_DIR = join(BASE_DIR, "receipts");
@@ -140,6 +141,31 @@ function main() {
     const statusScript = join(__dirname, "status.js");
     const res = spawnSync(process.execPath, [statusScript, ...commandArgs], { stdio: "inherit" });
     process.exit(res.status ?? 0);
+  }
+
+  // `tooloftruth alerts` — view/toggle alert categories
+  if (command === "alerts") {
+    const TOOLOFTRUTH_DIR = join(homedir(), ".tooloftruth");
+    const action = commandArgs[0]; // on | off | status
+    const category = commandArgs[1]; // category name
+
+    if (action === "status" || !action) {
+      console.log(formatAlertConfig(loadAlertConfig(TOOLOFTRUTH_DIR)));
+      process.exit(0);
+    }
+    if (action !== "on" && action !== "off") {
+      console.error('Usage: tooloftruth alerts <on|off|status> [category]\n  category: secret|pii|prompt_injection|dangerous_command|filesystem_action|install_action');
+      process.exit(1);
+    }
+    const on = action === "on";
+    if (category) {
+      const cfg = updateAlertConfig({ category: category as any, categoryEnabled: on }, TOOLOFTRUTH_DIR);
+      console.log(`Category '${category}' ${on ? "enabled" : "disabled"}.\n\n${formatAlertConfig(cfg)}`);
+    } else {
+      const cfg = updateAlertConfig({ enabled: on }, TOOLOFTRUTH_DIR);
+      console.log(`Alerts ${on ? "enabled" : "disabled"} globally.\n\n${formatAlertConfig(cfg)}`);
+    }
+    process.exit(0);
   }
 
   // `tooloftruth dashboard` — start the local dashboard server

@@ -697,6 +697,59 @@ server.tool(
 );
 
 server.tool(
+  "tooloftruth_alert_config",
+  "View or update alert configuration — which detection types produce alerts",
+  {
+    action: z.enum(["get", "set", "enable", "disable"]).default("get").describe("get=view, set=update, enable/disable=a category or master"),
+    category: z.enum(["secret", "pii", "prompt_injection", "dangerous_command", "filesystem_action", "install_action"]).optional().describe("Detection category to enable/disable"),
+    enabled: z.boolean().optional().describe("Master on/off (for set)"),
+    notifyCritical: z.boolean().optional().describe("Critical alerts → native notification"),
+    notifyWarning: z.boolean().optional().describe("Warning alerts → native notification"),
+  },
+  async ({ action, category, enabled, notifyCritical, notifyWarning }) => {
+    const { loadAlertConfig, updateAlertConfig, shouldAlert, formatAlertConfig } = await import("@tooloftruth/core");
+    const dir = TOOLOFTRUTH_DIR;
+
+    if (action === "get") {
+      const cfg = loadAlertConfig(dir);
+      return { content: [{ type: "text" as const, text: formatAlertConfig(cfg) }] };
+    }
+
+    // enable/disable: either a category or the master switch
+    const cfg = loadAlertConfig(dir);
+    if (action === "enable" || action === "disable") {
+      const on = action === "enable";
+      if (category) {
+        const updated = updateAlertConfig({ category, categoryEnabled: on }, dir);
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Category '${category}' ${on ? "enabled" : "disabled"}.\n\n${formatAlertConfig(updated)}`,
+          }],
+        };
+      }
+      // master switch
+      const updated = updateAlertConfig({ enabled: on }, dir);
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Alerts ${on ? "enabled" : "disabled"} globally.\n\n${formatAlertConfig(updated)}`,
+        }],
+      };
+    }
+
+    // set
+    const updated = updateAlertConfig({ enabled, notifyCritical, notifyWarning }, dir);
+    return {
+      content: [{
+        type: "text" as const,
+        text: `Alert config updated.\n\n${formatAlertConfig(updated)}`,
+      }],
+    };
+  }
+);
+
+server.tool(
   "tooloftruth_truth_scan",
   "Scan text for factual claims, verify them against real web sources using Crawl4AI, and produce a truth report with scientific framework analysis",
   {

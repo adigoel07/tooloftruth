@@ -99,6 +99,13 @@ export {
   formatDetection,
   formatScanResult,
 } from "./detectors.js";
+export {
+  detectFilesystemActions,
+  formatFsAction,
+} from "./detectors.js";
+export type {
+  FsActionDetection,
+} from "./detectors.js";
 export type {
   Detection,
   DetectionCategory,
@@ -115,3 +122,22 @@ export type {
   GitleaksFinding,
   GitleaksScanResult,
 } from "./gitleaks.js";
+export {
+  loadSessionMap,
+  formatReconciledSessions,
+} from "./session-reconcile.js";
+export type { ReconciledSession } from "./session-reconcile.js";
+export {
+  defaultAlertConfig,
+  loadAlertConfig,
+  saveAlertConfig,
+  updateAlertConfig,
+  shouldAlert,
+  shouldNotify,
+  formatAlertConfig,
+} from "./alert-config.js";
+export type {
+  AlertConfig,
+  AlertCategory,
+  SetAlertConfigInput,
+} from "./alert-config.js";

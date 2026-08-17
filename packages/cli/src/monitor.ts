@@ -4,7 +4,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { appendFileSync } from "fs";
 import { execSync } from "child_process";
-import { createOpenCodeMonitor, scanForSensitiveData } from "@tooloftruth/core";
+import { createOpenCodeMonitor, scanForSensitiveData, detectFilesystemActions, loadAlertConfig, shouldAlert, shouldNotify } from "@tooloftruth/core";
 import type { Detection } from "@tooloftruth/core";
 
 const TOOLOFTRUTH_DIR = process.env.TOOLOFTRUTH_DIR || join(homedir(), ".tooloftruth");
@@ -71,7 +71,12 @@ function notifySystem(title: string, body: string) {
   }
 }
 
-function logAlert(detection: Detection, sourceDetail: string) {
+function logAlert(detection: Detection, sourceDetail: string, sessionId?: string) {
+  const cfg = loadAlertConfig(TOOLOFTRUTH_DIR);
+  const category = detection.category as "secret" | "pii" | "prompt_injection" | "dangerous_command" | "filesystem_action" | "install_action";
+  const severity = detection.severity;
+  if (!shouldAlert(cfg, category, severity)) return; // category disabled
+
   const entry = {
     id: detection.id,
     timestamp: new Date().toISOString(),
@@ -80,6 +85,7 @@ function logAlert(detection: Detection, sourceDetail: string) {
     rule: detection.rule,
     source: detection.source,
     sourceDetail,
+    sessionId: sessionId || undefined,
     matchRedacted: detection.matchRedacted,
     confidence: detection.confidence,
     requiresReview: detection.requiresReview,
@@ -95,8 +101,8 @@ function logAlert(detection: Detection, sourceDetail: string) {
   appendFileSync(join(ALERTS_DIR, "latest-alert.txt"), block + "\n\n");
   console.error("\n" + block);
 
-  // Native notification for critical + warning (skip info)
-  if (detection.severity !== "info") {
+  // Native notification if enabled for this severity
+  if (shouldNotify(cfg, detection.severity)) {
     notifySystem(
       `Tool of Truth: ${detection.category}:${detection.rule}`,
       `${detection.severity.toUpperCase()} — ${detection.matchRedacted}`
@@ -104,11 +110,11 @@ function logAlert(detection: Detection, sourceDetail: string) {
   }
 }
 
-function scanText(text: string, source: string) {
+function scanText(text: string, source: string, sessionId?: string) {
   if (!text || text.length < 3) return;
   const result = scanForSensitiveData(text, source);
   for (const det of result.detections) {
-    logAlert(det, source);
+    logAlert(det, source, sessionId);
   }
 }
 
@@ -316,7 +322,7 @@ async function pollOpenCode() {
         timestamp: new Date(msg.timeCreated).toISOString(),
         sessionId: `opencode_${msg.sessionId}`,
         type: msg.role === "user" ? "observation" : "result",
-        content: (msg.text || `[${msg.role}]`).slice(0, 500),
+        content: msg.text || `[${msg.role}]`,
         role: msg.role,
         model: msg.modelID,
         costUsd: msg.cost,
@@ -337,7 +343,7 @@ async function pollOpenCode() {
 
       // Scan message text for sensitive data
       if (msg.text) {
-        scanText(msg.text, `message:${msg.id}`);
+        scanText(msg.text, `message:${msg.id}`, msg.sessionId);
       }
 
       // Also log tool calls as receipts so fabrication audit covers them
@@ -369,7 +375,34 @@ async function pollOpenCode() {
 
         // Scan tool call input (args/commands) for sensitive data + dangerous commands
         if (tc.input) {
-          scanText(JSON.stringify(tc.input), `tool:${tc.tool}`);
+          scanText(JSON.stringify(tc.input), `tool:${tc.tool}`, msg.sessionId);
+
+          // Filesystem actions: installs, writes, deletes, duplications
+          const command =
+            typeof (tc.input as any).command === "string"
+              ? ((tc.input as any).command as string)
+              : undefined;
+          const fsActions = detectFilesystemActions(tc.tool, tc.input, command);
+          for (const fs of fsActions) {
+            logAlert(
+              {
+                id: `fs_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+                category: fs.action === "install" ? "install_action" : "filesystem_action",
+                rule: fs.rule,
+                severity: fs.severity,
+                match: fs.detail,
+                matchRedacted: (fs.target || fs.detail).slice(0, 60),
+                start: 0,
+                end: (fs.target || fs.detail).length,
+                source: `tool:${tc.tool}`,
+                confidence: fs.confidence,
+                requiresReview: false,
+                context: fs.detail.slice(0, 120),
+              },
+              fs.detail,
+              msg.sessionId
+            );
+          }
         }
       }
     }
