@@ -123,6 +123,23 @@ Stats are written to `.tooloftruth/stats/YYYY-MM-DD.json`.
 
 `tooloftruth_truth_scan` does real web verification of claims: Bing search (curl) → crawl4ai fetch → evidence extraction → verdict.
 
+## Sensitive-Data Detection
+
+The daemon scans every new message and tool call for leaks, writing alerts with exact proof:
+
+- **Secrets**: 24 gitleaks-style rules + entropy — AWS keys, GitHub/OpenAI/Google/Anthropic tokens, JWTs, private keys, DB connection strings, generic API keys, passwords
+- **PII**: email, phone, SSN, credit card (Luhn-validated), IP, IBAN
+- **Prompt injection**: ignore-previous-instructions, system-prompt reveal, jailbreak (DAN), XML tag injection
+- **Dangerous commands**: `rm -rf /`, `curl | sh`, `dd` to disk, base64-decode-to-shell, etc.
+
+Alerts land in `~/.tooloftruth/alerts/` with redacted match, source, confidence, and surrounding context.
+
+**Deep scans**: `tooloftruth_gitleaks <repo>` runs gitleaks (200+ rules) over a repo's git history with exact file:line proof.
+
+## Behavior Ledger
+
+The daemon tracks per-session model, message/tool-call counts, error rate, token usage, and cost → `~/.tooloftruth/ledger/`. Query via `tooloftruth_ledger`.
+
 ## MCP Tools
 
 | Tool | Description |
@@ -138,6 +155,9 @@ Stats are written to `.tooloftruth/stats/YYYY-MM-DD.json`.
 | `tooloftruth_audit` | Cross-reference agent claims against actual tool calls |
 | `tooloftruth_conversation` | View conversation log |
 | `tooloftruth_truth_scan` | Web research + fact-check a claim |
+| `tooloftruth_alerts` | List sensitive-data alerts (PII/secrets/injection/commands) |
+| `tooloftruth_gitleaks` | Deep-scan a git repo for secrets |
+| `tooloftruth_ledger` | Per-session behavior (model, errors, tokens, cost) |
 
 ## How the MITM Proxy Works
 
