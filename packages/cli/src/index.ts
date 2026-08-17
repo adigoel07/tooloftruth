@@ -13,6 +13,23 @@ const BASE_DIR = join(homedir(), ".tooloftruth");
 const RECEIPTS_DIR = join(BASE_DIR, "receipts");
 const INDEX_PATH = join(BASE_DIR, "index.json");
 
+// ─── Brand ───────────────────────────────────────────────────
+const BRAND = {
+  name: "TOOL OF TRUTH",
+  icon: "◆",
+  separator: "┄",
+  width: 56,
+};
+
+function banner(): string {
+  const pad = Math.floor((BRAND.width - BRAND.name.length - 2) / 2);
+  return `${" ".repeat(pad)}${BRAND.icon} ${BRAND.name} ${BRAND.icon}`;
+}
+
+function separator(): string {
+  return BRAND.separator.repeat(BRAND.width);
+}
+
 function ensureDirs() {
   if (!existsSync(RECEIPTS_DIR)) mkdirSync(RECEIPTS_DIR, { recursive: true });
 }
@@ -206,7 +223,7 @@ function main() {
   }
   saveIndex(index);
 
-  // Print summary
+  // Print branded summary
   const status = isError ? "✗" : "✓";
   const duration = formatDuration(durationMs);
   const fullCommand = [command, ...commandArgs].join(" ");
@@ -218,7 +235,6 @@ function main() {
       const parsed = JSON.parse(output);
       summary = summarizeJsonOutput(command, parsed);
     } catch {
-      // Not JSON — show first few lines
       const lines = output.trim().split("\n");
       if (lines.length <= 5) {
         summary = lines.join("\n");
@@ -232,12 +248,18 @@ function main() {
 
   // Print
   console.log("");
-  console.log(`  ${status} ${fullCommand}`);
-  console.log(`    ${duration}  ·  trust ${record.verification.trustScore}/100  ·  ${isError ? `exit ${exitCode}` : "success"}`);
+  console.log(separator());
+  console.log(banner());
+  console.log(separator());
+  console.log("");
+  console.log(`  ${status}  ${fullCommand}`);
+  console.log(`     ${duration}  ·  trust ${record.verification.trustScore}/100  ·  ${isError ? `exit ${exitCode}` : "success"}`);
   if (summary) {
     console.log("");
     console.log("  " + summary.split("\n").join("\n  "));
   }
+  console.log("");
+  console.log(separator());
   console.log("");
   process.exit(exitCode);
 }
