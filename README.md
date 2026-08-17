@@ -2,81 +2,119 @@
 
 **Every tool call, proven.**
 
-Verification sentinel for AI agent tool usage. Catches fabrication, tracks costs, proves what actually happened.
+Verification sentinel for AI agent tool usage. MITM proxy that intercepts all MCP tool calls, detects fabrication, tracks costs, verifies outcomes, and infers user satisfaction.
 
-## What It Does
+## Features
 
-AI agents sometimes lie about using tools. They read documentation, mimic expected output, and present fabricated results as if the tool was called. Tool of Truth catches this.
-
-| Feature | Free (Open Source) |
-|---|---|
-| Fabrication detection | ✓ |
-| Tool usage verification | ✓ |
-| Trust scoring | ✓ |
-| Cost tracking | ✓ |
-| Token counting | ✓ |
-| Outcome verification | ✓ |
-| Skill adherence checking | ✓ |
-| User satisfaction inference | ✓ |
-| Verification receipts | ✓ |
-| Tool transparency | ✓ |
+| Feature | Status | Description |
+|---|---|---|
+| MITM Proxy | ✅ | Transparently intercepts all MCP tool calls |
+| Fabrication Detection | ✅ | 7-signal deep analysis: trace, doc-similarity, timing, placeholders, contradictions |
+| Trust Scoring | ✅ | Weighted 0-100 with fabrication cap |
+| Cost Tracking | ✅ | Per-call cost for 8 providers |
+| Token Counting | ✅ | Input/output tokens per call |
+| Outcome Verification | ✅ | Compares tool result against user's original prompt |
+| Skill Adherence | ✅ | Verifies workflow via manifests |
+| User Satisfaction | ✅ | Infers satisfaction from follow-up messages |
+| Receipts | ✅ | SHA-256 hashed, JSON + human-readable |
+| Local Storage | ✅ | JSONL daily files + indexed lookup |
+| Tool Transparency | ✅ | Shows what downstream tools actually do |
 
 ## Quick Start
 
-### Option A: MCP Server (Recommended)
+### 1. Install
 
 ```bash
 npm install -g tooloftruth-mcp
 ```
 
-Add to your MCP config:
+### 2. Connect (Option A: Direct)
+
 ```json
-"tooloftruth": { "command": "tooloftruth-mcp" }
+// Your agent's MCP config
+{
+  "tooloftruth": {
+    "command": "tooloftruth-mcp"
+  }
+}
 ```
 
-That's it. Every tool call is now intercepted, verified, and recorded.
+### 3. Connect (Option B: Proxy — MITM mode)
 
-### Option B: SKILL.md (Fallback)
+```json
+// Your agent's MCP config
+{
+  "tooloftruth": {
+    "command": "tooloftruth-mcp"
+  }
+}
+```
 
-Add the SKILL.md to your agent's skills directory. The agent will self-verify tool usage.
+```json
+// ~/.tooloftruth/proxy.json
+{
+  "servers": {
+    "firecrawl": { "command": "npx", "args": ["firecrawl-mcp"] },
+    "github": { "command": "npx", "args": ["@modelcontextprotocol/server-github"] }
+  }
+}
+```
 
-### Option C: Both (Best)
-
-Connect the MCP server AND load the SKILL.md for maximum coverage.
-
-## Usage
-
-Once connected, use `/truth` or ask your agent to verify tool usage:
+### 4. Use
 
 ```
 You: Did you actually use firecrawl?
 Agent: [calls tooloftruth_verify]
-Agent: VERIFIED — firecrawl was called at 10:30:02, trust score 98/100,
-        cost $0.03. Receipt: rcpt_m1x2k3...
+Agent: VERIFIED — firecrawl was called at 10:30:02, trust score 98/100, cost $0.03
+
+You: How much did I spend on tools today?
+Agent: [calls tooloftruth_cost]
+Agent: Total: $0.47 across 12 tool calls
+
+You: Was that result what I asked for?
+Agent: [calls tooloftruth_outcome]
+Agent: ALIGNED — tool result matches your request
+
+You: That's wrong, try again
+Agent: [calls tooloftruth_satisfaction]
+Agent: User appears dissatisfied — result may be wrong
 ```
 
-## How It Works
+## MCP Tools
 
-Tool of Truth sits between your agent and all MCP servers (MITM proxy). Every tool call flows through it transparently:
+| Tool | Description |
+|---|---|
+| `tooloftruth_verify` | Verify a specific tool was used |
+| `tooloftruth_check` | Pre-flight: is tool installed/configured? |
+| `tooloftruth_receipt` | Generate/view verification receipt |
+| `tooloftruth_cost` | Cost breakdown by tool |
+| `tooloftruth_history` | Search historical receipts |
+| `tooloftruth_truth` | Full session truth report |
+| `tooloftruth_satisfaction` | Infer user satisfaction from message |
+| `tooloftruth_outcome` | Verify result matches user prompt |
+
+## How the MITM Proxy Works
 
 ```
-Agent ←→ Tool of Truth ←→ MCP Server
+Agent ←→ Tool of Truth ←→ MCP Server (downstream)
               ↓
          Records everything
-         Verifies in real-time
-         Returns data to agent
+         Runs deep fabrication checks
+         Verifies outcome alignment
+         Infers satisfaction
+         Generates receipts
+         Returns result unchanged
 ```
-
-The agent doesn't change. You change one line of MCP config. All data stays on your machine.
 
 ## Storage
 
-All receipts and logs are stored locally:
+All data stays on your machine:
 
 ```
 .tooloftruth/
 ├── config.json          ← settings
 ├── index.json           ← fast lookup index
+├── proxy.json           ← downstream server config
 └── receipts/
     ├── 2026-08-17.jsonl ← today's calls
     └── ...
@@ -93,20 +131,21 @@ Skills can attach verification manifests:
   "requires": {
     "github_mcp": {
       "tool": "get_repo_stats",
-      "must_be_called": true
+      "mustBeCalled": true
     }
   }
 }
 ```
 
-Tool of Truth verifies: correct tools called? right order? right args? output follows rules?
+## Development
 
-## Documentation
-
-- [Quick Start](docs/quick-start.md)
-- [Verification Checks](docs/verification-checks.md)
-- [Skill Manifests](docs/skill-manifests.md)
-- [Contributing](docs/contributing.md)
+```bash
+git clone https://github.com/adigoel07/tooloftruth.git
+cd tooloftruth
+pnpm install
+pnpm build
+npx vitest run
+```
 
 ## License
 
