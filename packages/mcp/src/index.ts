@@ -12,6 +12,9 @@ import {
   formatCostReport,
   formatReceiptHuman,
   calculateCost,
+  detectDeepFabrication,
+  verifyOutcome,
+  SatisfactionTracker,
 } from "@tooloftruth/core";
 import type { ToolCallRecord, TokenUsage } from "@tooloftruth/core";
 import { McpProxy } from "./proxy.js";
@@ -22,6 +25,7 @@ const verifier = new Verifier();
 const store = new ReceiptStore(TOOLOFTRUTH_DIR);
 const manifests = loadAllManifests(TOOLOFTRUTH_DIR);
 const proxy = new McpProxy(TOOLOFTRUTH_DIR);
+const satisfaction = new SatisfactionTracker();
 
 const sessionId = `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 
@@ -237,6 +241,16 @@ server.tool(
   {},
   async () => {
     const stats = store.getStats();
+    const satResults = satisfaction.getAllResults();
+    const satisfactionSummary = Array.from(satResults.entries()).map(
+      ([id, r]) => ({
+        toolCallId: id,
+        satisfied: r.satisfied,
+        confidence: r.confidence,
+        signals: r.signals,
+      })
+    );
+
     return {
       content: [
         {
@@ -268,7 +282,107 @@ server.tool(
                   0
                 ),
               },
+              satisfaction: satisfactionSummary,
               historicalStats: stats,
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  }
+);
+
+server.tool(
+  "tooloftruth_satisfaction",
+  "Report user satisfaction for the last tool call based on their follow-up message",
+  {
+    message: z.string().describe("The user's follow-up message after a tool result"),
+    toolCallId: z.string().optional().describe("Specific tool call ID (defaults to most recent)"),
+  },
+  async ({ message, toolCallId }) => {
+    const callId =
+      toolCallId ||
+      sessionCalls[sessionCalls.length - 1]?.id ||
+      "unknown";
+
+    const result = satisfaction.inferFromNextMessage(callId, message);
+
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify(
+            {
+              toolCallId: callId,
+              satisfied: result.satisfied,
+              confidence: Math.round(result.confidence * 100),
+              signals: result.signals,
+              interpretation:
+                result.satisfied === true
+                  ? "User appears satisfied with the tool result"
+                  : result.satisfied === false
+                    ? "User appears dissatisfied — result may be wrong"
+                    : "Cannot determine user satisfaction",
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  }
+);
+
+server.tool(
+  "tooloftruth_outcome",
+  "Verify if a tool result matches what the user asked for",
+  {
+    prompt: z.string().describe("The user's original prompt/request"),
+    toolCallId: z.string().optional().describe("Tool call ID to check"),
+  },
+  async ({ prompt, toolCallId }) => {
+    const call = toolCallId
+      ? sessionCalls.find((c) => c.id === toolCallId)
+      : sessionCalls[sessionCalls.length - 1];
+
+    if (!call) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(
+              { error: "No tool call found to verify" },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+
+    const toolDef = proxy.getTools().find(
+      (t) => t.originalName === call.tool && t.serverName === call.server
+    );
+
+    const outcome = verifyOutcome(prompt, call.result, toolDef?.description);
+
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify(
+            {
+              toolCallId: call.id,
+              tool: call.tool,
+              server: call.server,
+              aligned: outcome.aligned,
+              confidence: Math.round(outcome.confidence * 100),
+              issues: outcome.issues,
+              interpretation: outcome.aligned
+                ? "Tool result matches the user's request"
+                : `Tool result has issues: ${outcome.issues.join("; ")}`,
             },
             null,
             2
@@ -301,9 +415,51 @@ async function registerProxyTools(): Promise<void> {
           await proxy.callTool(toolName, args);
 
         const manifest = manifests.get(tool.serverName);
-        const verification = await verifier.verifyToolCall(record, manifest);
-        record.verification = verification;
+
+        // Deep fabrication detection
+        const toolDef = proxy.getTools().find((t) => t.name === toolName);
+        const deepSignals = detectDeepFabrication(
+          record,
+          toolDef?.description
+        );
+        const deepConfidence = deepSignals
+          .filter((s) => s.triggered)
+          .reduce((sum, s) => sum + s.weight, 0);
+
+        // Outcome verification
+        const outcome = verifyOutcome(
+          record.userPrompt || "",
+          record.result,
+          toolDef?.description
+        );
+
+        // Trust scoring with deep signals
+        const invocationOk = record.durationMs > 0 && !record.isError;
+        const outputOk = record.result !== null && record.result !== undefined;
+        const trust = verifier.calculateTrustScore(
+          invocationOk,
+          outputOk,
+          deepSignals,
+          true
+        );
+
+        record.verification = {
+          schemaValid: true,
+          responsePlausible: outcome.aligned,
+          trustScore: trust.overall,
+          verdict: trust.verdict,
+          fabricationConfidence: deepConfidence,
+          checksPerformed: [
+            "invocation",
+            "output",
+            "fabrication_deep",
+            "outcome",
+          ],
+        };
         record.sessionId = sessionId;
+
+        // Track satisfaction
+        satisfaction.trackToolResult(record.id);
 
         recordCall(record);
 

@@ -35,3 +35,13 @@ export {
   loadManifestFromDisk,
   loadAllManifests,
 } from "./manifests.js";
+export {
+  detectDeepFabrication,
+  verifyOutcome,
+} from "./fabrication.js";
+export type { OutcomeResult } from "./fabrication.js";
+export {
+  inferSatisfaction,
+  SatisfactionTracker,
+} from "./satisfaction.js";
+export type { SatisfactionResult } from "./satisfaction.js";
