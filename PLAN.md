@@ -105,15 +105,25 @@ IF Tool of Truth MCP is NOT connected:
 
 ## 7 Core Features
 
-| # | Feature | Free/Pro | Description |
+| # | Feature | Status | Description |
 |---|---|---|---|
-| 1 | Fabrication Detection | Free | Catches agents claiming tool use when they didn't — no call in the log |
-| 2 | Cost Tracking | Pro | Per-tool-call cost in USD, session totals, budget alerts |
-| 3 | Token Counting | Pro | Input/output tokens consumed per tool call |
-| 4 | Outcome Verification | Pro | Checks if tool result actually matched what the user asked for |
-| 5 | Skill Adherence | Pro | Verifies agent followed the skill's defined workflow via manifest |
-| 6 | Tool Transparency | Free + Pro | Shows what third-party tools actually do (schema + cost + behavior) |
-| 7 | User Satisfaction Inference | Pro | Checks user's next message: did they accept the result or complain? |
+| 1 | Fabrication Detection | ✅ | 7-signal deep analysis: trace, doc-similarity, timing, placeholders, contradictions |
+| 2 | Cost Tracking | ✅ | Per-call cost for 8 providers, session totals, historical |
+| 3 | Token Counting | ✅ | Input/output tokens per call |
+| 4 | Outcome Verification | ✅ | Entity extraction, error detection, doc-similarity, generic text detection |
+| 5 | Skill Adherence | ✅ | Manifest parsing + verification |
+| 6 | User Satisfaction | ✅ | Pattern matching + SatisfactionTracker |
+| 7 | Tool Transparency | ✅ | Shows what downstream tools do via schema display |
+
+### Additional Features (v1.1)
+
+| Feature | Status | Description |
+|---|---|---|
+| Cost Alerts | ✅ | Daily spike, single expensive call, budget exceeded, unusual patterns |
+| Tool Reliability | ✅ | Success rate, fabrication rate, A-F grading |
+| Budget Limits | ✅ | Daily and per-call limits with blocking |
+| Auto-Discovery | ✅ | Scans agent configs, auto-generates proxy.json |
+| MITM Proxy | ✅ | Transparent interception of downstream MCP servers |
 
 ---
 
