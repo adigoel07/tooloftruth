@@ -108,22 +108,25 @@ IF Tool of Truth MCP is NOT connected:
 | # | Feature | Status | Description |
 |---|---|---|---|
 | 1 | Fabrication Detection | ✅ | 7-signal deep analysis: trace, doc-similarity, timing, placeholders, contradictions |
-| 2 | Cost Tracking | ✅ | Per-call cost for 8 providers, session totals, historical |
-| 3 | Token Counting | ✅ | Input/output tokens per call |
-| 4 | Outcome Verification | ✅ | Entity extraction, error detection, doc-similarity, generic text detection |
-| 5 | Skill Adherence | ✅ | Manifest parsing + verification |
-| 6 | User Satisfaction | ✅ | Pattern matching + SatisfactionTracker |
-| 7 | Tool Transparency | ✅ | Shows what downstream tools do via schema display |
+| 2 | Outcome Verification | ✅ | Entity extraction, error detection, doc-similarity, generic text detection |
+| 3 | Skill Adherence | ✅ | Manifest parsing + verification |
+| 4 | User Satisfaction | ✅ | Pattern matching + SatisfactionTracker |
+| 5 | Tool Transparency | ✅ | Shows what downstream tools do via schema display |
+| 6 | Truth Scan | ✅ | Fact-checking with scientific frameworks, claim extraction, evidence assessment |
+| 7 | Continuous Honesty | ✅ | Conversation logging, claim audit, cross-reference against tool calls |
 
-### Additional Features (v1.1)
+### Additional Features
 
 | Feature | Status | Description |
 |---|---|---|
-| Cost Alerts | ✅ | Daily spike, single expensive call, budget exceeded, unusual patterns |
-| Tool Reliability | ✅ | Success rate, fabrication rate, A-F grading |
-| Budget Limits | ✅ | Daily and per-call limits with blocking |
-| Auto-Discovery | ✅ | Scans agent configs, auto-generates proxy.json |
 | MITM Proxy | ✅ | Transparent interception of downstream MCP servers |
+| Auto-Discovery | ✅ | Scans agent configs, auto-generates proxy.json |
+| Tool Reliability | ✅ | Success rate, fabrication rate, A-F grading |
+| CLI Wrapper | ✅ | `tooloftruth-run` monitors non-MCP tools |
+| Daemon | ✅ | launchd plist for persistent monitoring |
+| SKILL.md | ✅ | Agent fallback verification |
+| `/truth` Command | ✅ | Invokable via "/" in chat |
+| JSONL Receipts | ✅ | Indexed storage with lookup |
 
 ---
 
