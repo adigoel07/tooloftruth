@@ -13,66 +13,111 @@ export interface CrawlResult {
   links: string[];
 }
 
-// ─── Search ──────────────────────────────────────────────────
+// ─── Search (via Bing HTML, parseable without JS) ───────────
 
 export function searchWeb(query: string, maxResults: number = 5): SearchResult[] {
+  const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=${Math.max(10, maxResults * 2)}`;
   try {
-    const cmd = `crwl search "${query.replace(/"/g, '\\"')}" -n ${maxResults} --json`;
-    const output = execSync(cmd, {
-      encoding: "utf-8",
-      timeout: 30000,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    const output = execSync(
+      `curl -sL --max-time 20 -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36" "${url}"`,
+      {
+        encoding: "utf-8",
+        timeout: 25000,
+        maxBuffer: 10 * 1024 * 1024,
+        stdio: ["pipe", "pipe", "pipe"],
+      }
+    );
 
-    // Parse JSON output
-    const results = JSON.parse(output);
-    if (Array.isArray(results)) {
-      return results.map((r: Record<string, unknown>) => ({
-        title: String(r.title || r.name || ""),
-        url: String(r.url || r.link || ""),
-        snippet: String(r.snippet || r.description || r.content || "").slice(0, 300),
-      }));
-    }
-
-    // If not JSON, try line-by-line parsing
-    return parseSearchOutput(output);
-  } catch {
-    // Fallback: try without --json
-    return searchWebFallback(query, maxResults);
-  }
-}
-
-function searchWebFallback(query: string, maxResults: number): SearchResult[] {
-  try {
-    const cmd = `crwl search "${query.replace(/"/g, '\\"')}" -n ${maxResults}`;
-    const output = execSync(cmd, {
-      encoding: "utf-8",
-      timeout: 30000,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    return parseSearchOutput(output);
+    return parseBingHtml(output, maxResults);
   } catch {
     return [];
   }
 }
 
-function parseSearchOutput(output: string): SearchResult[] {
+function parseBingHtml(html: string, maxResults: number): SearchResult[] {
   const results: SearchResult[] = [];
-  const lines = output.split("\n").filter((l) => l.trim());
 
-  for (const line of lines) {
-    // Try to extract URL and title from common formats
-    const urlMatch = line.match(/https?:\/\/[^\s]+/);
-    if (urlMatch) {
-      results.push({
-        title: line.replace(urlMatch[0], "").trim().slice(0, 200) || "Untitled",
-        url: urlMatch[0],
-        snippet: line.slice(0, 300),
-      });
+  // Bing organic results: <li class="b_algo">... <h2><a href="URL">Title</a></h2> ...
+  const algoPattern = /\<li class="b_algo"[^>]*>([\s\S]*?)<\/li>/g;
+  const resultBlocks = [...html.matchAll(algoPattern)];
+
+  for (const block of resultBlocks) {
+    if (results.length >= maxResults) break;
+
+    const content = block[1];
+    const linkMatch = content.match(/\<h2[^>]*>\s*\<a[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>/i);
+    if (!linkMatch) continue;
+
+    const url = linkMatch[1];
+    const title = stripHtml(linkMatch[2]).trim();
+
+    // Extract snippet: <p>...</p> after the title
+    const snippetMatch = content.match(/\<p[^>]*>([\s\S]*?)<\/p>/);
+    const snippet = snippetMatch ? stripHtml(snippetMatch[1]).trim() : "";
+
+    // Decode Bing redirect URLs (bing.com/ck/a?...u=a1aHR...)
+    const decodedUrl = decodeBingUrl(url);
+    if (decodedUrl.startsWith("http")) {
+      results.push({ title, url: decodedUrl, snippet });
     }
   }
 
-  return results.slice(0, 10);
+  // Fallback: if no b_algo blocks, try Google-style <a href> extraction
+  if (results.length === 0) {
+    const fallbackLinks = [...html.matchAll(/href="(https?:\/\/[^"]+)"/g)];
+    for (const m of fallbackLinks) {
+      const url = m[1];
+      if (/bing\.com|microsoft\.com|bing\.net/.test(url)) continue;
+      if (results.length >= maxResults) break;
+      results.push({ title: "", url: decodeBingUrl(url), snippet: "" });
+    }
+  }
+
+  return results;
+}
+
+function decodeBingUrl(url: string): string {
+  // Bing gives redirect URLs like:
+  //   https://www.bing.com/ck/a?...&amp;u=a1aHR0cHM6Ly9lbi53aWtpcGVkaWEub3Jn...
+  // The u= param is URL-safe base64 (a1 prefix) of the real URL.
+  // The query string may have HTML-escaped &amp; (unlikely in a raw href, but handled).
+  // Decode &amp; first, then operate on the plain query string.
+  const plain = url.replace(/&amp;/g, "&");
+
+  const uMatch = plain.match(/[?&]u=a1([A-Za-z0-9+/=_-]+)/);
+  if (uMatch) {
+    try {
+      const b64 = uMatch[1].replace(/-/g, "+").replace(/_/g, "/");
+      // Pad to multiple of 4
+      const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+      const decoded = Buffer.from(padded, "base64").toString("utf-8");
+      if (decoded.startsWith("http")) return decoded;
+    } catch {
+      // fall through
+    }
+  }
+  const directMatch = plain.match(/[?&]url=([^&]+)/);
+  if (directMatch) {
+    try {
+      const decoded = decodeURIComponent(directMatch[1]);
+      if (decoded.startsWith("http")) return decoded;
+    } catch {
+      // fall through
+    }
+  }
+  return url;
+}
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .trim();
 }
 
 // ─── Crawl ───────────────────────────────────────────────────
