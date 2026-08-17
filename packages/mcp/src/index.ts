@@ -37,6 +37,11 @@ import type { ToolCallRecord, TokenUsage } from "@tooloftruth/core";
 import { McpProxy } from "./proxy.js";
 import { discoverDownstreamServers, generateProxyConfig } from "./discovery.js";
 import { writeFileSync, existsSync } from "fs";
+import {
+  checkManifestCall,
+  formatManifestResult,
+} from "@tooloftruth/core";
+import type { ManifestCheckResult } from "@tooloftruth/core";
 
 const TOOLOFTRUTH_DIR = join(homedir(), ".tooloftruth");
 
@@ -669,13 +674,83 @@ async function registerProxyTools(): Promise<void> {
       desc,
       inputSchema,
       async (args: Record<string, unknown>) => {
+        const toolDef = proxy.getTools().find((t) => t.name === toolName);
+
+        // ─── Manifest enforcement (pre-call) ─────────────────────
+        const manifest = manifests.get(tool.serverName);
+        let manifestResult: ManifestCheckResult | null = null;
+        if (manifest) {
+          // Arg + budget check against this tool's expected args
+          manifestResult = checkManifestCall(
+            manifest,
+            tool.originalName,
+            tool.serverName,
+            args,
+            0,
+            null
+          );
+          if (!manifestResult.allowed) {
+            // Block the call — it violates the manifest
+            const violation = manifestResult.violations[0];
+            const blockedRecord: ToolCallRecord = {
+              id: `call_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+              timestamp: new Date().toISOString(),
+              tool: tool.originalName,
+              server: tool.serverName,
+              sessionId,
+              userPrompt: "",
+              params: args,
+              result: { error: "BLOCKED_BY_MANIFEST" },
+              durationMs: 0,
+              isError: true,
+              tokens: { input: 0, output: 0 },
+              costUsd: 0,
+              verification: {
+                schemaValid: false,
+                responsePlausible: false,
+                trustScore: 0,
+                verdict: "FABRICATION",
+                fabricationConfidence: 1,
+                checksPerformed: ["manifest_enforcement"],
+              },
+            };
+            recordCall(blockedRecord);
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify(
+                    {
+                      error: "BLOCKED_BY_MANIFEST",
+                      skill: manifest.skill,
+                      violation: violation?.type,
+                      detail: violation?.detail,
+                    },
+                    null,
+                    2
+                  ),
+                },
+              ],
+            };
+          }
+        }
+
         const { result, durationMs, isError, record } =
           await proxy.callTool(toolName, args);
 
-        const manifest = manifests.get(tool.serverName);
+        // ─── Manifest enforcement (post-call: output rules + cost) ─
+        if (manifest) {
+          manifestResult = checkManifestCall(
+            manifest,
+            tool.originalName,
+            tool.serverName,
+            args,
+            record.costUsd,
+            record.result
+          );
+        }
 
         // Deep fabrication detection
-        const toolDef = proxy.getTools().find((t) => t.name === toolName);
         const deepSignals = detectDeepFabrication(
           record,
           toolDef?.description
@@ -701,17 +776,28 @@ async function registerProxyTools(): Promise<void> {
           true
         );
 
+        const manifestViolations = manifestResult?.violations || [];
+
         record.verification = {
           schemaValid: true,
           responsePlausible: outcome.aligned,
-          trustScore: trust.overall,
-          verdict: trust.verdict,
+          trustScore: Math.min(
+            trust.overall,
+            manifestViolations.filter((v) => v.severity === "error").length > 0
+              ? 50
+              : trust.overall
+          ),
+          verdict:
+            manifestViolations.filter((v) => v.severity === "error").length > 0
+              ? "SUSPICIOUS"
+              : trust.verdict,
           fabricationConfidence: deepConfidence,
           checksPerformed: [
             "invocation",
             "output",
             "fabrication_deep",
             "outcome",
+            "manifest_enforcement",
           ],
         };
         record.sessionId = sessionId;
@@ -766,6 +852,10 @@ function jsonSchemaToZod(schema: unknown): Record<string, z.ZodTypeAny> {
 // ─── Start ────────────────────────────────────────────────────
 
 async function main() {
+  // Support the plan's one-liner: `npx tooloftruth-mcp <serverName>`
+  // Restricts the sentinel to proxy just that downstream server.
+  const explicitServer = process.argv[2];
+
   // Auto-discover downstream servers if proxy.json is empty/missing
   const proxyConfigPath = join(TOOLOFTRUTH_DIR, "proxy.json");
   if (!existsSync(proxyConfigPath) || proxy.getServerNames().length === 0) {
@@ -785,8 +875,13 @@ async function main() {
     }
   }
 
-  if (proxy.getServerNames().length > 0) {
-    await proxy.connectAll();
+  const serversToConnect =
+    explicitServer && proxy.getServerNames().includes(explicitServer)
+      ? [explicitServer]
+      : proxy.getServerNames();
+
+  if (serversToConnect.length > 0) {
+    await proxy.connectAll(serversToConnect);
     await registerProxyTools();
   }
 

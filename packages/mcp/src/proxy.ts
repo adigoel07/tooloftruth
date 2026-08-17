@@ -3,6 +3,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { calculateCost } from "@tooloftruth/core";
 import type { ToolCallRecord, TokenUsage } from "@tooloftruth/core";
 
 export interface DownstreamServer {
@@ -48,10 +49,11 @@ export class McpProxy {
     }
   }
 
-  async connectAll(): Promise<InterceptedTool[]> {
+  async connectAll(only?: string[]): Promise<InterceptedTool[]> {
     const allTools: InterceptedTool[] = [];
 
     for (const [name, server] of Object.entries(this.config.servers)) {
+      if (only && !only.includes(name)) continue;
       try {
         const tools = await this.connectServer(name, server);
         allTools.push(...tools);
@@ -135,6 +137,7 @@ export class McpProxy {
     const durationMs = Date.now() - start;
 
     const tokens = this.extractTokens(result);
+    const costUsd = calculateCost(tokens, tool.serverName);
     const record: ToolCallRecord = {
       id: `call_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
       timestamp: new Date().toISOString(),
@@ -147,7 +150,7 @@ export class McpProxy {
       durationMs,
       isError,
       tokens,
-      costUsd: 0,
+      costUsd,
       verification: {
         schemaValid: true,
         responsePlausible: true,

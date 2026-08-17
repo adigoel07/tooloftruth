@@ -36,6 +36,14 @@ export {
   loadAllManifests,
 } from "./manifests.js";
 export {
+  checkManifestCall,
+  formatManifestResult,
+} from "./manifest-enforce.js";
+export type {
+  ManifestCheckResult,
+  ManifestViolation,
+} from "./manifest-enforce.js";
+export {
   detectDeepFabrication,
   verifyOutcome,
 } from "./fabrication.js";
