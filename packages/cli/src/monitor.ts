@@ -60,14 +60,24 @@ function buildAlertBlock(entry: Record<string, unknown>, detection: Detection, s
   ].join("\n");
 }
 
-function notifySystem(title: string, body: string) {
+function notifySystem(title: string, body: string, openUrl?: string, alertId?: string) {
   try {
-    // macOS native notification. Escape for AppleScript.
     const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-    const script = `osascript -e 'display notification "${esc(body)}" with title "${esc(title)}"'`;
+    // Prefer terminal-notifier: supports -open (opens URL on click) + -group
+    let script = `terminal-notifier -title "${esc(title)}" -message "${esc(body)}" -sound default`;
+    if (openUrl) script += ` -open "${esc(openUrl)}"`;
+    if (alertId) script += ` -group "${esc(alertId)}"`;
+    script += ` -sender com.apple.ScriptEditor`;
     execSync(script, { timeout: 5000, stdio: "pipe" });
   } catch {
-    // notifications are best-effort; never crash the daemon on failure
+    // Fallback to osascript if terminal-notifier isn't available
+    try {
+      const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      const script = `osascript -e 'display notification "${esc(body)}" with title "${esc(title)}"'`;
+      execSync(script, { timeout: 5000, stdio: "pipe" });
+    } catch {
+      // best-effort; never crash the daemon
+    }
   }
 }
 
@@ -103,9 +113,13 @@ function logAlert(detection: Detection, sourceDetail: string, sessionId?: string
 
   // Native notification if enabled for this severity
   if (shouldNotify(cfg, detection.severity)) {
+    const dashPort = Number(process.env.TOOLOFTRUTH_PORT || 4321);
+    const openUrl = `http://localhost:${dashPort}/?alert=${encodeURIComponent(entry.id as string)}`;
     notifySystem(
       `Tool of Truth: ${detection.category}:${detection.rule}`,
-      `${detection.severity.toUpperCase()} — ${detection.matchRedacted}`
+      `${detection.severity.toUpperCase()} — ${detection.matchRedacted}`,
+      openUrl,
+      String(entry.id)
     );
   }
 }

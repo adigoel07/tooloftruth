@@ -819,9 +819,35 @@ document.querySelectorAll("nav button").forEach(b => {
   });
 });
 
+/* ─── Deep-link handling: ?alert=<id> ─────────────────────── */
+function handleDeepLink() {
+  const params = new URLSearchParams(window.location.search);
+  const alertId = params.get("alert");
+  if (!alertId) return;
+  // Switch to Alerts view
+  const alertsBtn = document.querySelector('button[data-view="alerts"]');
+  if (alertsBtn) alertsBtn.click();
+  // Wait for data, then find + highlight the alert
+  const highlight = () => {
+    const card = document.querySelector(`.alert-card[data-alert-id="${CSS.escape(alertId)}"]`);
+    if (card) {
+      card.classList.add("open");
+      card.scrollIntoView({ behavior: "smooth", block: "center" });
+      card.style.transition = "box-shadow 0.3s";
+      card.style.boxShadow = "0 0 0 3px var(--witness)";
+      setTimeout(() => { card.style.boxShadow = "none"; }, 4000);
+    }
+  };
+  if (document.querySelectorAll(".alert-card").length > 0) highlight();
+  else setTimeout(highlight, 1000);
+  // Clear the URL param so refresh doesn't re-trigger
+  history.replaceState({}, "", "/");
+}
+
 /* ─── Auto-refresh ─────────────────────────────────────────── */
 load();
 setInterval(load, 15000);
+setTimeout(handleDeepLink, 500);
 </script>
 </body>
 </html>
