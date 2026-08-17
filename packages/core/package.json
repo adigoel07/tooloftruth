@@ -14,7 +14,9 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean",
     "dev": "tsup src/index.ts --format esm --dts --watch",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "pnpm build",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

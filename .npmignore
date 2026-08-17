@@ -1,0 +1,11 @@
+dist/
+node_modules/
+*.tsbuildinfo
+.DS_Store
+.env
+*.log
+test-servers/
+packages/core/src/__tests__/
+packages/mcp/src/__tests__/
+.vitest/
+tooloftruth-test/
