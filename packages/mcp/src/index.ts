@@ -14,59 +14,23 @@ import {
   calculateCost,
 } from "@tooloftruth/core";
 import type { ToolCallRecord, TokenUsage } from "@tooloftruth/core";
+import { McpProxy } from "./proxy.js";
 
 const TOOLOFTRUTH_DIR = join(homedir(), ".tooloftruth");
 
 const verifier = new Verifier();
 const store = new ReceiptStore(TOOLOFTRUTH_DIR);
 const manifests = loadAllManifests(TOOLOFTRUTH_DIR);
+const proxy = new McpProxy(TOOLOFTRUTH_DIR);
 
 const sessionId = `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 
-const toolCalls: ToolCallRecord[] = [];
+const sessionCalls: ToolCallRecord[] = [];
 
-function recordToolCall(
-  tool: string,
-  server: string,
-  params: Record<string, unknown>,
-  result: unknown,
-  durationMs: number,
-  isError: boolean,
-  tokens: TokenUsage,
-  userPrompt: string
-): ToolCallRecord {
-  const cost = calculateCost(tokens, server);
-  const record: ToolCallRecord = {
-    id: `call_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
-    timestamp: new Date().toISOString(),
-    tool,
-    server,
-    sessionId,
-    userPrompt,
-    params,
-    result: result as Record<string, unknown>,
-    durationMs,
-    isError,
-    tokens,
-    costUsd: cost,
-    verification: {
-      schemaValid: true,
-      responsePlausible: true,
-      trustScore: 100,
-      verdict: "VERIFIED",
-      fabricationConfidence: 0,
-      checksPerformed: [],
-    },
-  };
-
-  const manifest = manifests.get(server);
-  verifier.verifyToolCall(record, manifest).then((v: import("@tooloftruth/core").VerificationResult) => {
-    record.verification = v;
-  });
-
-  toolCalls.push(record);
+function recordCall(record: ToolCallRecord): void {
+  record.sessionId = sessionId;
+  sessionCalls.push(record);
   store.appendCall(record);
-  return record;
 }
 
 const server = new McpServer({
@@ -74,12 +38,16 @@ const server = new McpServer({
   version: "0.1.0",
 });
 
+// ─── Tool of Truth's own tools ────────────────────────────────
+
 server.tool(
   "tooloftruth_verify",
   "Verify that a specific tool was actually used in this session",
   { tool: z.string().describe("Name of the tool to verify") },
   async ({ tool }) => {
-    const calls = toolCalls.filter((c) => c.tool === tool);
+    const calls = sessionCalls.filter(
+      (c) => c.tool === tool || c.server === tool
+    );
     const latest = calls[calls.length - 1];
 
     if (!latest) {
@@ -93,7 +61,6 @@ server.tool(
                 trustScore: 0,
                 verdict: "UNVERIFIABLE",
                 detail: `No calls to '${tool}' found in this session.`,
-                receipt: null,
               },
               null,
               2
@@ -156,7 +123,7 @@ server.tool(
   async ({ action, receiptId }) => {
     if (action === "generate") {
       const receipt = buildReceipt(
-        toolCalls,
+        sessionCalls,
         { name: "unknown", version: "0.1.0", sessionId },
         { name: "unknown", type: "mcp", installed: true, configured: true }
       );
@@ -176,9 +143,10 @@ server.tool(
           {
             type: "text" as const,
             text: JSON.stringify(
-              toolCalls.map((c) => ({
+              sessionCalls.map((c) => ({
                 id: c.id,
                 tool: c.tool,
+                server: c.server,
                 verdict: c.verification.verdict,
                 trustScore: c.verification.trustScore,
                 timestamp: c.timestamp,
@@ -195,7 +163,9 @@ server.tool(
       content: [
         {
           type: "text" as const,
-          text: `Receipt viewing for '${receiptId}' — coming in v2.`,
+          text: receiptId
+            ? `Receipt '${receiptId}' — full view coming in v2.`
+            : "Provide a receiptId to view.",
         },
       ],
     };
@@ -214,16 +184,12 @@ server.tool(
   },
   async ({ tool }) => {
     const filtered = tool
-      ? toolCalls.filter((c) => c.tool === tool)
-      : toolCalls;
-
+      ? sessionCalls.filter((c) => c.tool === tool || c.server === tool)
+      : sessionCalls;
     const breakdown = buildCostBreakdown(filtered);
     return {
       content: [
-        {
-          type: "text" as const,
-          text: formatCostReport(breakdown),
-        },
+        { type: "text" as const, text: formatCostReport(breakdown) },
       ],
     };
   }
@@ -237,25 +203,19 @@ server.tool(
     limit: z.number().default(20).describe("Max results"),
   },
   async ({ tool, limit }) => {
-    const maxResults = limit;
-    let records = tool
-      ? store.queryTool(tool)
-      : store.getStats().totalCalls > 0
-        ? toolCalls
-        : [];
-
-    records = records.slice(-maxResults);
-
+    const records = tool ? store.queryTool(tool) : sessionCalls;
+    const sliced = records.slice(-limit);
     return {
       content: [
         {
           type: "text" as const,
           text: JSON.stringify(
             {
-              count: records.length,
-              records: records.map((r: ToolCallRecord) => ({
+              count: sliced.length,
+              records: sliced.map((r: ToolCallRecord) => ({
                 id: r.id,
                 tool: r.tool,
+                server: r.server,
                 timestamp: r.timestamp,
                 verdict: r.verification.verdict,
                 trustScore: r.verification.trustScore,
@@ -277,32 +237,126 @@ server.tool(
   {},
   async () => {
     const stats = store.getStats();
-    const summary = {
-      sessionId,
-      totalCalls: toolCalls.length,
-      verified: toolCalls.filter((c) => c.verification.verdict === "VERIFIED").length,
-      fabricated: toolCalls.filter((c) => c.verification.verdict === "FABRICATION").length,
-      suspicious: toolCalls.filter((c) => c.verification.verdict === "SUSPICIOUS").length,
-      totalCostUsd: toolCalls.reduce((s, c) => s + c.costUsd, 0),
-      totalTokens: {
-        input: toolCalls.reduce((s, c) => s + c.tokens.input, 0),
-        output: toolCalls.reduce((s, c) => s + c.tokens.output, 0),
-      },
-      historicalStats: stats,
-    };
-
     return {
       content: [
         {
           type: "text" as const,
-          text: JSON.stringify(summary, null, 2),
+          text: JSON.stringify(
+            {
+              sessionId,
+              totalCalls: sessionCalls.length,
+              verified: sessionCalls.filter(
+                (c) => c.verification.verdict === "VERIFIED"
+              ).length,
+              fabricated: sessionCalls.filter(
+                (c) => c.verification.verdict === "FABRICATION"
+              ).length,
+              suspicious: sessionCalls.filter(
+                (c) => c.verification.verdict === "SUSPICIOUS"
+              ).length,
+              totalCostUsd: sessionCalls.reduce(
+                (s, c) => s + c.costUsd,
+                0
+              ),
+              totalTokens: {
+                input: sessionCalls.reduce(
+                  (s, c) => s + c.tokens.input,
+                  0
+                ),
+                output: sessionCalls.reduce(
+                  (s, c) => s + c.tokens.output,
+                  0
+                ),
+              },
+              historicalStats: stats,
+            },
+            null,
+            2
+          ),
         },
       ],
     };
   }
 );
 
+// ─── Proxy: register downstream tools ────────────────────────
+
+async function registerProxyTools(): Promise<void> {
+  if (!proxy.isConnected()) return;
+
+  const tools = proxy.getTools();
+  for (const tool of tools) {
+    const toolName = tool.name;
+    const desc = `[proxied via ${tool.serverName}] ${tool.description}`;
+
+    // Build a Zod schema from JSON Schema properties
+    const inputSchema = jsonSchemaToZod(tool.inputSchema);
+
+    server.tool(
+      toolName,
+      desc,
+      inputSchema,
+      async (args: Record<string, unknown>) => {
+        const { result, durationMs, isError, record } =
+          await proxy.callTool(toolName, args);
+
+        const manifest = manifests.get(tool.serverName);
+        const verification = await verifier.verifyToolCall(record, manifest);
+        record.verification = verification;
+        record.sessionId = sessionId;
+
+        recordCall(record);
+
+        const content =
+          result &&
+          typeof result === "object" &&
+          "content" in result
+            ? (result as { content: unknown }).content
+            : [{ type: "text" as const, text: JSON.stringify(result, null, 2) }];
+
+        return { content };
+      }
+    );
+  }
+}
+
+function jsonSchemaToZod(schema: unknown): Record<string, z.ZodTypeAny> {
+  if (!schema || typeof schema !== "object") {
+    return { _: z.record(z.unknown()) };
+  }
+  const s = schema as { properties?: Record<string, { type?: string; description?: string }>; required?: string[] };
+  if (!s.properties) {
+    return { _: z.record(z.unknown()) };
+  }
+
+  const shape: Record<string, z.ZodTypeAny> = {};
+  const required = new Set(s.required || []);
+
+  for (const [key, prop] of Object.entries(s.properties)) {
+    let zodType: z.ZodTypeAny;
+    switch (prop.type) {
+      case "string": zodType = z.string(); break;
+      case "number": case "integer": zodType = z.number(); break;
+      case "boolean": zodType = z.boolean(); break;
+      case "array": zodType = z.array(z.unknown()); break;
+      default: zodType = z.unknown(); break;
+    }
+    if (prop.description) zodType = zodType.describe(prop.description);
+    if (!required.has(key)) zodType = zodType.optional();
+    shape[key] = zodType;
+  }
+
+  return shape;
+}
+
+// ─── Start ────────────────────────────────────────────────────
+
 async function main() {
+  if (proxy.getServerNames().length > 0) {
+    await proxy.connectAll();
+    await registerProxyTools();
+  }
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
