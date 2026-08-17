@@ -18,6 +18,8 @@ import {
 } from "@tooloftruth/core";
 import type { ToolCallRecord, TokenUsage } from "@tooloftruth/core";
 import { McpProxy } from "./proxy.js";
+import { discoverDownstreamServers, generateProxyConfig } from "./discovery.js";
+import { writeFileSync, existsSync } from "fs";
 
 const TOOLOFTRUTH_DIR = join(homedir(), ".tooloftruth");
 
@@ -508,6 +510,25 @@ function jsonSchemaToZod(schema: unknown): Record<string, z.ZodTypeAny> {
 // ─── Start ────────────────────────────────────────────────────
 
 async function main() {
+  // Auto-discover downstream servers if proxy.json is empty/missing
+  const proxyConfigPath = join(TOOLOFTRUTH_DIR, "proxy.json");
+  if (!existsSync(proxyConfigPath) || proxy.getServerNames().length === 0) {
+    const discovered = discoverDownstreamServers();
+    if (discovered.length > 0) {
+      const autoConfig = generateProxyConfig(discovered);
+      writeFileSync(proxyConfigPath, JSON.stringify(autoConfig, null, 2));
+      // Re-create proxy with auto-discovered config
+      const autoProxy = new McpProxy(TOOLOFTRUTH_DIR);
+      if (autoProxy.getServerNames().length > 0) {
+        await autoProxy.connectAll();
+        // Copy tools from auto-proxy to main proxy reference
+        for (const tool of autoProxy.getTools()) {
+          (proxy as any).tools?.set?.(tool.name, tool);
+        }
+      }
+    }
+  }
+
   if (proxy.getServerNames().length > 0) {
     await proxy.connectAll();
     await registerProxyTools();
