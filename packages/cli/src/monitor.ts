@@ -3,9 +3,12 @@ import { watch, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync 
 import { join } from "path";
 import { homedir } from "os";
 import { appendFileSync } from "fs";
-import { execSync } from "child_process";
+import { execSync, spawn } from "child_process";
+import { fileURLToPath } from "url";
 import { createOpenCodeMonitor, scanForSensitiveData } from "@tooloftruth/core";
 import type { Detection } from "@tooloftruth/core";
+
+const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
 const TOOLOFTRUTH_DIR = process.env.TOOLOFTRUTH_DIR || join(homedir(), ".tooloftruth");
 const RECEIPTS_DIR = join(TOOLOFTRUTH_DIR, "receipts");
@@ -384,6 +387,23 @@ async function pollOpenCode() {
 console.error(`[tooloftruth:daemon] Watching ${RECEIPTS_DIR} (poll ${POLL_MS}ms)`);
 runOnce();
 setInterval(runOnce, POLL_MS);
+
+// ─── Dashboard server (localhost, spawned alongside daemon) ──
+function startDashboard() {
+  const dashPath = process.env.TOOLOFTRUTH_DASHBOARD || join(__dirname, "..", "..", "dashboard", "dist", "server.js");
+  if (!existsSync(dashPath)) return;
+  try {
+    const child = spawn(process.execPath, [dashPath], {
+      stdio: "ignore",
+      detached: true,
+    });
+    child.unref();
+    console.error("[tooloftruth:daemon] Dashboard started on http://localhost:4321");
+  } catch (e) {
+    console.error(`[tooloftruth:daemon] Dashboard start failed: ${(e as Error).message}`);
+  }
+}
+startDashboard();
 
 initOpenCodeMonitor().then(() => {
   pollOpenCode();

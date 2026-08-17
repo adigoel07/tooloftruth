@@ -1,0 +1,22 @@
+{
+  "name": "@tooloftruth/dashboard",
+  "version": "0.1.0",
+  "description": "Tool of Truth local dashboard — truth ledger, alerts, costs, behavior, conversations",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "tooloftruth-dashboard": "./dist/server.js"
+  },
+  "scripts": {
+    "build": "tsup src/server.ts --format esm --clean --no-splitting",
+    "dev": "tsup src/server.ts --format esm --watch",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "pnpm build"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -48,6 +48,18 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/dashboard:
+    devDependencies:
+      '@types/node':
+        specifier: ^26.2.0
+        version: 26.2.0
+      tsup:
+        specifier: ^8.4.0
+        version: 8.5.1(postcss@8.5.26)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/mcp:
     dependencies:
       '@modelcontextprotocol/sdk':
