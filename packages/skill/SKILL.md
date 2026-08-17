@@ -38,6 +38,8 @@ actually calling the tool.
 - If you're unsure whether you used it, verify before claiming
 - Include verification status in responses when Tool of Truth MCP is connected
 - If fabrication is detected, STOP and report to user
+- **LOG EVERY CLAIM**: Before claiming you used a tool, call `tooloftruth_log_claim` with the tool name and what you're about to say. This creates an audit trail for honesty verification.
+- **AUDIT YOURSELF**: Periodically call `tooloftruth_audit` to check if your claims match reality.
 
 ## Using /truth
 

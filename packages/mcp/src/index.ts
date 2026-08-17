@@ -19,6 +19,9 @@ import {
   formatAlerts,
   calculateReliability,
   formatReliability,
+  ConversationLogger,
+  crossReferenceClaims,
+  formatClaimVerifications,
 } from "@tooloftruth/core";
 import type { ToolCallRecord, TokenUsage, BudgetConfig } from "@tooloftruth/core";
 import { McpProxy } from "./proxy.js";
@@ -34,6 +37,8 @@ const proxy = new McpProxy(TOOLOFTRUTH_DIR);
 const satisfaction = new SatisfactionTracker();
 
 const sessionId = `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+
+const convLogger = new ConversationLogger(TOOLOFTRUTH_DIR, sessionId);
 
 const sessionCalls: ToolCallRecord[] = [];
 
@@ -538,6 +543,126 @@ server.tool(
               avgCostPerCall: sessionCalls.length > 0
                 ? `$${(sessionCalls.reduce((s, c) => s + c.costUsd, 0) / sessionCalls.length).toFixed(4)}`
                 : "$0.0000",
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  }
+);
+
+server.tool(
+  "tooloftruth_log_claim",
+  "Log a tool usage claim from the agent for later verification",
+  {
+    tool: z.string().describe("Name of the tool being claimed"),
+    context: z.string().describe("What the agent said about using this tool"),
+  },
+  async ({ tool, context }) => {
+    const entry = convLogger.logClaim(tool, context);
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify(
+            {
+              logged: true,
+              claimId: entry.id,
+              timestamp: entry.timestamp,
+              tool,
+              message: `Claim logged. Use tooloftruth_audit to verify against actual tool calls.`,
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  }
+);
+
+server.tool(
+  "tooloftruth_log_action",
+  "Log an action the agent is performing for audit trail",
+  {
+    action: z.string().describe("Description of the action being performed"),
+  },
+  async ({ action }) => {
+    const entry = convLogger.logAction(action);
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify({ logged: true, actionId: entry.id, timestamp: entry.timestamp }),
+        },
+      ],
+    };
+  }
+);
+
+server.tool(
+  "tooloftruth_audit",
+  "Cross-reference agent claims against actual tool calls — detects fabrication",
+  {},
+  async () => {
+    const claims = convLogger.getClaims();
+    const toolCallsForCrossRef = sessionCalls.map((c) => ({
+      tool: c.tool,
+      server: c.server,
+      timestamp: c.timestamp,
+    }));
+
+    const verifications = crossReferenceClaims(claims, toolCallsForCrossRef);
+
+    const fabricated = verifications.filter((v) => v.verdict === "FABRICATION");
+    const verified = verifications.filter((v) => v.verdict === "VERIFIED");
+
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: formatClaimVerifications(verifications) +
+            `\n\nTool calls this session: ${sessionCalls.length}` +
+            `\nClaims made: ${claims.length}` +
+            `\nFabrications detected: ${fabricated.length}` +
+            `\nVerified claims: ${verified.length}`,
+        },
+      ],
+    };
+  }
+);
+
+server.tool(
+  "tooloftruth_conversation",
+  "View the conversation log for this session",
+  {
+    limit: z.number().default(20).describe("Max entries to return"),
+    type: z.enum(["all", "claims", "actions", "results"]).default("all").describe("Filter by type"),
+  },
+  async ({ limit, type }) => {
+    let entries = convLogger.getEntries();
+    if (type !== "all") {
+      const filterType = type === "claims" ? "claim" : type === "actions" ? "action" : "result";
+      entries = entries.filter((e) => e.type === filterType);
+    }
+    entries = entries.slice(-limit);
+
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify(
+            {
+              count: entries.length,
+              entries: entries.map((e) => ({
+                id: e.id,
+                timestamp: e.timestamp,
+                type: e.type,
+                content: e.content.slice(0, 200),
+                toolMentioned: e.toolMentioned,
+              })),
             },
             null,
             2

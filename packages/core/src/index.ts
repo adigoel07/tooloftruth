@@ -56,3 +56,9 @@ export {
   formatReliability,
 } from "./reliability.js";
 export type { ToolReliability } from "./reliability.js";
+export {
+  ConversationLogger,
+  crossReferenceClaims,
+  formatClaimVerifications,
+} from "./conversation.js";
+export type { ConversationEntry, ClaimVerification } from "./conversation.js";
