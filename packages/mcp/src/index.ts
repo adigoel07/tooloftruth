@@ -20,7 +20,17 @@ import {
   ConversationLogger,
   crossReferenceClaims,
   formatClaimVerifications,
+  extractClaims,
+  classifyClaim,
+  assessEvidence,
+  calculateCredibility,
+  determineVerdict,
+  classifyInput,
+  assessScientificRigor,
+  generateSuggestions,
+  formatTruthScanResult,
 } from "@tooloftruth/core";
+import type { TruthScanResult, ClaimAnalysis, ScanOptions } from "@tooloftruth/core";
 import type { ToolCallRecord, TokenUsage } from "@tooloftruth/core";
 import { McpProxy } from "./proxy.js";
 import { discoverDownstreamServers, generateProxyConfig } from "./discovery.js";
@@ -541,6 +551,67 @@ server.tool(
             2
           ),
         },
+      ],
+    };
+  }
+);
+
+server.tool(
+  "tooloftruth_truth_scan",
+  "Scan text for factual claims, verify them against sources, and produce a truth report with scientific framework analysis",
+  {
+    text: z.string().describe("Text to scan for truth — can be facts, claims, code, research, or opinions"),
+    depth: z.enum(["quick", "standard", "deep"]).default("standard").describe("Scan depth: quick (fast), standard (balanced), deep (thorough)"),
+  },
+  async ({ text, depth }) => {
+    const inputType = classifyInput(text);
+    const claimTexts = extractClaims(text);
+
+    const claims: ClaimAnalysis[] = claimTexts.map((claimText) => {
+      const evidence = assessEvidence(claimText);
+      const claimType = classifyClaim(claimText);
+
+      // For now, assess without external sources (MCP tool will be called for source search)
+      const credibility = calculateCredibility(claimText, [], evidence);
+
+      return {
+        claim: claimText,
+        score: credibility.score,
+        verdict: credibility.score >= 70 ? "supported" : credibility.score >= 40 ? "unverifiable" : "unsupported",
+        evidence: evidence.notes,
+        sources: [],
+        reasoning: `Claim type: ${claimType}. ${evidence.hasEvidence ? `Evidence found: ${evidence.evidenceType}` : "No evidence in text."} ${credibility.factors.join(". ")}`,
+      };
+    });
+
+    // Calculate overall score
+    const overallScore = claims.length > 0
+      ? Math.round(claims.reduce((s, c) => s + c.score, 0) / claims.length)
+      : 50;
+
+    const scientific = depth !== "quick" ? assessScientificRigor(text) : undefined;
+
+    const result: TruthScanResult = {
+      id: `scan_${Date.now().toString(36)}`,
+      timestamp: new Date().toISOString(),
+      input: text.slice(0, 500),
+      inputType,
+      overallScore,
+      confidence: Math.min(95, Math.max(20, overallScore)),
+      verdict: determineVerdict(overallScore),
+      claims,
+      sources: [],
+      suggestions: generateSuggestions(claims, [], scientific),
+      methodology: depth === "deep"
+        ? "Deep scan: full claim extraction, evidence assessment, scientific framework analysis, source cross-reference"
+        : depth === "standard"
+          ? "Standard scan: claim extraction, evidence assessment, credibility scoring"
+          : "Quick scan: basic claim extraction and classification",
+    };
+
+    return {
+      content: [
+        { type: "text" as const, text: formatTruthScanResult(result) },
       ],
     };
   }

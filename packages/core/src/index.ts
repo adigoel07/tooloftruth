@@ -56,3 +56,15 @@ export {
   formatClaimVerifications,
 } from "./conversation.js";
 export type { ConversationEntry, ClaimVerification } from "./conversation.js";
+export type { TruthScanResult, ClaimAnalysis, Source, ScanOptions } from "./truth-scan.js";
+export {
+  extractClaims,
+  classifyClaim,
+  assessEvidence,
+  calculateCredibility,
+  determineVerdict,
+  classifyInput,
+  assessScientificRigor,
+  generateSuggestions,
+} from "./truth-engine.js";
+export { formatTruthScanResult } from "./truth-formatter.js";
