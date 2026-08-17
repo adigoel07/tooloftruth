@@ -1,3 +1,4 @@
+import { execSync } from "child_process";
 import type {
   FabricationSignal,
   VerificationResult,
@@ -51,7 +52,6 @@ export class Verifier {
 
   private checkInstalled(tool: string): boolean {
     try {
-      const { execSync } = require("child_process") as typeof import("child_process");
       execSync(`which ${tool} 2>/dev/null`, { stdio: "pipe" });
       return true;
     } catch {
@@ -65,7 +65,6 @@ export class Verifier {
 
   private getVersion(tool: string): string | null {
     try {
-      const { execSync } = require("child_process") as typeof import("child_process");
       const out = execSync(`${tool} --version 2>/dev/null`, {
         stdio: "pipe",
       }).toString();

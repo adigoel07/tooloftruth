@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync } from "fs";
 import { join } from "path";
 import type { ToolCallRecord, IndexData } from "./types.js";
 
@@ -189,7 +189,6 @@ export class ReceiptStore {
   private getReceiptFiles(): string[] {
     const receiptsDir = join(this.baseDir, "receipts");
     if (!existsSync(receiptsDir)) return [];
-    const { readdirSync } = require("fs");
     return readdirSync(receiptsDir)
       .filter((f: string) => f.endsWith(".jsonl"))
       .sort()

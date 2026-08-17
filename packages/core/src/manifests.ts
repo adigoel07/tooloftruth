@@ -1,5 +1,5 @@
 import type { SkillManifest } from "./types.js";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 
 export function parseManifest(data: unknown): SkillManifest {
@@ -44,7 +44,6 @@ export function loadAllManifests(baseDir: string): Map<string, SkillManifest> {
   const manifestsDir = join(baseDir, "manifests");
   if (!existsSync(manifestsDir)) return manifests;
 
-  const { readdirSync } = require("fs");
   const files = readdirSync(manifestsDir).filter((f: string) =>
     f.endsWith(".json")
   );
