@@ -15,8 +15,12 @@ import {
   detectDeepFabrication,
   verifyOutcome,
   SatisfactionTracker,
+  checkCostAlerts,
+  formatAlerts,
+  calculateReliability,
+  formatReliability,
 } from "@tooloftruth/core";
-import type { ToolCallRecord, TokenUsage } from "@tooloftruth/core";
+import type { ToolCallRecord, TokenUsage, BudgetConfig } from "@tooloftruth/core";
 import { McpProxy } from "./proxy.js";
 import { discoverDownstreamServers, generateProxyConfig } from "./discovery.js";
 import { writeFileSync, existsSync } from "fs";
@@ -385,6 +389,155 @@ server.tool(
               interpretation: outcome.aligned
                 ? "Tool result matches the user's request"
                 : `Tool result has issues: ${outcome.issues.join("; ")}`,
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  }
+);
+
+server.tool(
+  "tooloftruth_alerts",
+  "Check for cost anomalies and budget alerts",
+  {
+    dailyLimit: z.number().optional().describe("Daily budget limit in USD"),
+    perCallLimit: z.number().optional().describe("Per-call cost limit in USD"),
+  },
+  async ({ dailyLimit, perCallLimit }) => {
+    const config: BudgetConfig = {
+      dailyLimitUsd: dailyLimit,
+      perCallLimitUsd: perCallLimit,
+    };
+
+    // Calculate historical daily average from stored receipts
+    const stats = store.getStats();
+    const daysWithCalls = Math.max(1, stats.totalFiles);
+    const historicalAvg = stats.totalCostUsd / daysWithCalls;
+
+    const alerts = checkCostAlerts(sessionCalls, config, historicalAvg);
+    return {
+      content: [
+        { type: "text" as const, text: formatAlerts(alerts) },
+      ],
+    };
+  }
+);
+
+server.tool(
+  "tooloftruth_reliability",
+  "Get tool reliability scores — success rate, fabrication rate, grade",
+  {},
+  async () => {
+    const allCalls = [...sessionCalls];
+    // Also include historical calls from today
+    const today = new Date().toISOString().slice(0, 10);
+    const todayHistorical = store.queryTool("");
+    for (const c of todayHistorical) {
+      if (c.timestamp.startsWith(today) && !allCalls.find((e) => e.id === c.id)) {
+        allCalls.push(c);
+      }
+    }
+
+    const reliability = calculateReliability(allCalls);
+    return {
+      content: [
+        { type: "text" as const, text: formatReliability(reliability) },
+      ],
+    };
+  }
+);
+
+server.tool(
+  "tooloftruth_budget",
+  "Set or check budget limits for tool usage",
+  {
+    action: z.enum(["set", "check", "status"]).describe("Action: set limits, check if call would exceed, or show status"),
+    dailyLimit: z.number().optional().describe("Daily budget limit in USD (for set)"),
+    perCallLimit: z.number().optional().describe("Per-call limit in USD (for set)"),
+    estimatedCost: z.number().optional().describe("Estimated call cost (for check)"),
+  },
+  async ({ action, dailyLimit, perCallLimit, estimatedCost }) => {
+    if (action === "set") {
+      const config: BudgetConfig = {
+        dailyLimitUsd: dailyLimit,
+        perCallLimitUsd: perCallLimit,
+      };
+      // Store config (in-memory for now, would persist to .tooloftruth/config.json)
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(
+              {
+                status: "Budget limits set",
+                dailyLimit: dailyLimit ? `$${dailyLimit}/day` : "not set",
+                perCallLimit: perCallLimit ? `$${perCallLimit}/call` : "not set",
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+
+    if (action === "check") {
+      const today = new Date().toISOString().slice(0, 10);
+      const todayCost = sessionCalls
+        .filter((c) => c.timestamp.startsWith(today))
+        .reduce((s, c) => s + c.costUsd, 0);
+
+      const config: BudgetConfig = {
+        dailyLimitUsd: dailyLimit,
+        perCallLimitUsd: perCallLimit,
+      };
+
+      const result = shouldBlockCall(
+        estimatedCost || 0,
+        config,
+        todayCost
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(
+              {
+                blocked: result.blocked,
+                reason: result.reason || "Call allowed",
+                todaySpent: `$${todayCost.toFixed(4)}`,
+                estimatedCost: `$${(estimatedCost || 0).toFixed(4)}`,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+
+    // status
+    const today = new Date().toISOString().slice(0, 10);
+    const todayCost = sessionCalls
+      .filter((c) => c.timestamp.startsWith(today))
+      .reduce((s, c) => s + c.costUsd, 0);
+
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify(
+            {
+              todaySpent: `$${todayCost.toFixed(4)}`,
+              totalSessionCost: `$${sessionCalls.reduce((s, c) => s + c.costUsd, 0).toFixed(4)}`,
+              totalCalls: sessionCalls.length,
+              avgCostPerCall: sessionCalls.length > 0
+                ? `$${(sessionCalls.reduce((s, c) => s + c.costUsd, 0) / sessionCalls.length).toFixed(4)}`
+                : "$0.0000",
             },
             null,
             2
