@@ -68,3 +68,14 @@ export {
   generateSuggestions,
 } from "./truth-engine.js";
 export { formatTruthScanResult } from "./truth-formatter.js";
+export {
+  searchWeb,
+  crawlPage,
+  crawlMultiple,
+  searchAndCrawl,
+} from "./crawl4ai-client.js";
+export type { SearchResult, CrawlResult } from "./crawl4ai-client.js";
+export {
+  verifyClaimAgainstSources,
+  calculateCredibilityWithSources,
+} from "./truth-engine.js";

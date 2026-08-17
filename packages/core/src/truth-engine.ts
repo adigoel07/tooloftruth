@@ -1,4 +1,6 @@
 import type { TruthScanResult, ClaimAnalysis, Source, ScanOptions } from "./truth-scan.js";
+import { searchWeb, crawlPage } from "./crawl4ai-client.js";
+import type { SearchResult, CrawlResult } from "./crawl4ai-client.js";
 
 // ─── Claim Extraction ────────────────────────────────────────
 
@@ -248,6 +250,190 @@ export function classifyInput(text: string): TruthScanResult["inputType"] {
   if (hasFactual && hasOpinion) return "mixed";
 
   return "fact";
+}
+
+// ─── Crawl4AI Source Verification ────────────────────────────
+
+export function verifyClaimAgainstSources(
+  claim: string,
+  maxSources: number = 3
+): { sources: Source[]; evidenceTexts: string[] } {
+  const searchResults = searchWeb(claim, maxSources);
+  const sources: Source[] = [];
+  const evidenceTexts: string[] = [];
+
+  for (const result of searchResults) {
+    if (!result.url) continue;
+
+    const crawled = crawlPage(result.url, 4000);
+    if (!crawled) continue;
+
+    // Assess source reliability
+    const reliability = assessSourceReliability(result.url, crawled);
+
+    // Check if the crawled content supports or contradicts the claim
+    const evidenceStrength = assessContentAgainstClaim(claim, crawled.content);
+
+    sources.push({
+      url: result.url,
+      title: crawled.title || result.title,
+      snippet: crawled.content.slice(0, 300),
+      relevance: evidenceStrength.relevance,
+      reliability,
+    });
+
+    if (evidenceStrength.evidence) {
+      evidenceTexts.push(evidenceStrength.evidence);
+    }
+  }
+
+  return { sources, evidenceTexts };
+}
+
+function assessSourceReliability(url: string, crawled: CrawlResult): number {
+  let score = 0.5; // baseline
+
+  const domain = url.toLowerCase();
+
+  // High-reliability domains
+  if (/\.gov|\.edu|\.org|wikipedia\.org|nature\.com|science\.org|who\.int|nih\.gov|cdc\.gov/i.test(domain)) {
+    score = 0.9;
+  }
+  // Medium-reliability domains
+  else if (/bbc\.|reuters\.|apnews\.|nytimes\.|theguardian\.|washingtonpost\.|economist\.|forbes\.|techcrunch\.|arstechnica\./i.test(domain)) {
+    score = 0.7;
+  }
+  // Known low-reliability patterns
+  else if (/wiki|fandom|reddit\.com|quora\.com|medium\.com|substack\.com|wordpress\.com|blogspot\./i.test(domain)) {
+    score = 0.3;
+  }
+  // GitHub/code repos
+  else if (/github\.com|gitlab\.com|stackoverflow\.com/i.test(domain)) {
+    score = 0.6;
+  }
+  // Default
+  else {
+    score = 0.5;
+  }
+
+  // Content quality adjustments
+  if (crawled.content.length < 200) score *= 0.7; // thin content
+  if (crawled.content.length > 5000) score = Math.min(1, score * 1.1); // substantial content
+
+  return Math.round(score * 100) / 100;
+}
+
+function assessContentAgainstClaim(
+  claim: string,
+  content: string
+): { relevance: number; evidence: string | null } {
+  const claimWords = claim
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length > 3);
+
+  // Count how many claim words appear in content
+  const contentLower = content.toLowerCase();
+  const matches = claimWords.filter((w) => contentLower.includes(w));
+  const relevance = claimWords.length > 0 ? matches.length / claimWords.length : 0;
+
+  // Find the most relevant paragraph
+  const paragraphs = content.split(/\n\n+/);
+  let bestParagraph = "";
+  let bestScore = 0;
+
+  for (const para of paragraphs) {
+    const paraLower = para.toLowerCase();
+    const paraMatches = claimWords.filter((w) => paraLower.includes(w)).length;
+    if (paraMatches > bestScore) {
+      bestScore = paraMatches;
+      bestParagraph = para;
+    }
+  }
+
+  // Determine if evidence supports or contradicts
+  const hasNegation = /\b(not|no|never|does not|doesnt|isn't|wasn't|cannot|can't|false|incorrect)\b/i.test(bestParagraph);
+  const hasAffirmation = /\b(yes|confirmed|verified|true|correct|accurate|according to|study found|research shows)\b/i.test(bestParagraph);
+
+  let evidence: string | null = null;
+  if (relevance > 0.3 && bestParagraph.length > 50) {
+    const snippet = bestParagraph.slice(0, 500);
+    if (hasNegation && !hasAffirmation) {
+      evidence = `[CONTRADICTS] ${snippet}`;
+    } else if (hasAffirmation && !hasNegation) {
+      evidence = `[SUPPORTS] ${snippet}`;
+    } else {
+      evidence = `[NEUTRAL] ${snippet}`;
+    }
+  }
+
+  return { relevance: Math.min(1, relevance), evidence };
+}
+
+// ─── Credibility Scoring with Sources ────────────────────────
+
+export function calculateCredibilityWithSources(
+  claim: string,
+  sources: Source[],
+  evidence: EvidenceAssessment,
+  evidenceTexts: string[]
+): { score: number; factors: string[] } {
+  const factors: string[] = [];
+  let score = 50;
+
+  // Source quality
+  const reliableSources = sources.filter((s) => s.reliability > 0.7);
+  const unreliableSources = sources.filter((s) => s.reliability < 0.3);
+
+  if (reliableSources.length > 0) {
+    score += Math.min(25, reliableSources.length * 12);
+    factors.push(`${reliableSources.length} reliable source(s) found`);
+  }
+
+  if (unreliableSources.length > 0) {
+    score -= Math.min(15, unreliableSources.length * 8);
+    factors.push(`${unreliableSources.length} low-reliability source(s)`);
+  }
+
+  // Evidence from web
+  const supportingEvidence = evidenceTexts.filter((e) => e.startsWith("[SUPPORTS]"));
+  const contradictingEvidence = evidenceTexts.filter((e) => e.startsWith("[CONTRADICTS]"));
+
+  if (supportingEvidence.length > 0) {
+    score += Math.min(20, supportingEvidence.length * 10);
+    factors.push(`${supportingEvidence.length} source(s) support the claim`);
+  }
+
+  if (contradictingEvidence.length > 0) {
+    score -= Math.min(25, contradictingEvidence.length * 12);
+    factors.push(`${contradictingEvidence.length} source(s) contradict the claim`);
+  }
+
+  // Relevance
+  const avgRelevance = sources.length > 0
+    ? sources.reduce((s, src) => s + src.relevance, 0) / sources.length
+    : 0;
+  if (avgRelevance > 0.5) {
+    score += 10;
+    factors.push("Sources are relevant to the claim");
+  }
+
+  // Evidence strength from text analysis
+  if (evidence.hasEvidence) {
+    score += Math.round(evidence.strength * 15);
+    factors.push(`In-text evidence: ${evidence.evidenceType}`);
+  }
+
+  // Source count
+  if (sources.length === 0) {
+    score -= 20;
+    factors.push("No sources found online");
+  } else if (sources.length >= 3) {
+    score += 5;
+    factors.push(`${sources.length} sources cross-referenced`);
+  }
+
+  return { score: Math.max(0, Math.min(100, score)), factors };
 }
 
 // ─── Suggestion Generation ───────────────────────────────────

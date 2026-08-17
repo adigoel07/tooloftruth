@@ -29,6 +29,8 @@ import {
   assessScientificRigor,
   generateSuggestions,
   formatTruthScanResult,
+  verifyClaimAgainstSources,
+  calculateCredibilityWithSources,
 } from "@tooloftruth/core";
 import type { TruthScanResult, ClaimAnalysis, ScanOptions } from "@tooloftruth/core";
 import type { ToolCallRecord, TokenUsage } from "@tooloftruth/core";
@@ -558,31 +560,52 @@ server.tool(
 
 server.tool(
   "tooloftruth_truth_scan",
-  "Scan text for factual claims, verify them against sources, and produce a truth report with scientific framework analysis",
+  "Scan text for factual claims, verify them against real web sources using Crawl4AI, and produce a truth report with scientific framework analysis",
   {
     text: z.string().describe("Text to scan for truth — can be facts, claims, code, research, or opinions"),
-    depth: z.enum(["quick", "standard", "deep"]).default("standard").describe("Scan depth: quick (fast), standard (balanced), deep (thorough)"),
+    depth: z.enum(["quick", "standard", "deep"]).default("standard").describe("Scan depth: quick (fast, no crawl), standard (crawl top 3 sources per claim), deep (crawl top 5, deeper analysis)"),
   },
   async ({ text, depth }) => {
     const inputType = classifyInput(text);
     const claimTexts = extractClaims(text);
 
-    const claims: ClaimAnalysis[] = claimTexts.map((claimText) => {
+    // Limit claims based on depth
+    const maxClaims = depth === "quick" ? 3 : depth === "standard" ? 5 : 10;
+    const claimsToScan = claimTexts.slice(0, maxClaims);
+
+    const claims: ClaimAnalysis[] = [];
+
+    for (const claimText of claimsToScan) {
       const evidence = assessEvidence(claimText);
       const claimType = classifyClaim(claimText);
 
-      // For now, assess without external sources (MCP tool will be called for source search)
-      const credibility = calculateCredibility(claimText, [], evidence);
+      let sources: Source[] = [];
+      let evidenceTexts: string[] = [];
 
-      return {
+      // Use Crawl4AI for web verification (skip for quick mode)
+      if (depth !== "quick") {
+        const maxSources = depth === "deep" ? 5 : 3;
+        const verification = verifyClaimAgainstSources(claimText, maxSources);
+        sources = verification.sources;
+        evidenceTexts = verification.evidenceTexts;
+      }
+
+      const credibility = calculateCredibilityWithSources(
+        claimText,
+        sources,
+        evidence,
+        evidenceTexts
+      );
+
+      claims.push({
         claim: claimText,
         score: credibility.score,
         verdict: credibility.score >= 70 ? "supported" : credibility.score >= 40 ? "unverifiable" : "unsupported",
-        evidence: evidence.notes,
-        sources: [],
-        reasoning: `Claim type: ${claimType}. ${evidence.hasEvidence ? `Evidence found: ${evidence.evidenceType}` : "No evidence in text."} ${credibility.factors.join(". ")}`,
-      };
-    });
+        evidence: [...evidence.notes, ...evidenceTexts],
+        sources: sources.map((s) => s.url),
+        reasoning: `Claim type: ${claimType}. ${evidence.hasEvidence ? `In-text evidence: ${evidence.evidenceType}` : "No in-text evidence."} ${credibility.factors.join(". ")}`,
+      });
+    }
 
     // Calculate overall score
     const overallScore = claims.length > 0
@@ -590,6 +613,17 @@ server.tool(
       : 50;
 
     const scientific = depth !== "quick" ? assessScientificRigor(text) : undefined;
+
+    // Collect all sources for the report
+    const allSources: Source[] = claims.flatMap((c) =>
+      c.sources.map((url) => ({
+        url,
+        title: "",
+        snippet: "",
+        relevance: 0.5,
+        reliability: 0.5,
+      }))
+    );
 
     const result: TruthScanResult = {
       id: `scan_${Date.now().toString(36)}`,
@@ -600,13 +634,13 @@ server.tool(
       confidence: Math.min(95, Math.max(20, overallScore)),
       verdict: determineVerdict(overallScore),
       claims,
-      sources: [],
-      suggestions: generateSuggestions(claims, [], scientific),
+      sources: allSources,
+      suggestions: generateSuggestions(claims, allSources, scientific),
       methodology: depth === "deep"
-        ? "Deep scan: full claim extraction, evidence assessment, scientific framework analysis, source cross-reference"
+        ? "Deep scan: Crawl4AI crawling top 5 sources per claim, full claim extraction, evidence assessment, scientific framework analysis"
         : depth === "standard"
-          ? "Standard scan: claim extraction, evidence assessment, credibility scoring"
-          : "Quick scan: basic claim extraction and classification",
+          ? "Standard scan: Crawl4AI crawling top 3 sources per claim, claim extraction, evidence assessment, credibility scoring"
+          : "Quick scan: basic claim extraction and classification (no web crawl)",
     };
 
     return {
