@@ -25,14 +25,24 @@ The following are **wired and verified on this machine**, not just designed:
 - **Sentinel MITM proxy**: MCP server exposes `echo__*` proxied tools from `test-servers/echo-minimal.cjs`. Verified: `echo__echo` call → trust 100, verdict VERIFIED, receipt written.
 - **Receipts**: live in `~/.tooloftruth/receipts/*.jsonl`; index.json tracks totals (11+ calls recorded).
 - **Conversation logger**: claims/actions persisted to `~/.tooloftruth/conversations/*.jsonl`.
-- **Daemon**: `com.tooloftruth.daemon` loaded in launchd (PID live), KeepAlive, polls receipts → aggregates stats to `~/.tooloftruth/stats/YYYY-MM-DD.json`.
+- **Daemon**: `com.tooloftruth.daemon` loaded in launchd (PID live), KeepAlive, polls receipts → aggregates stats to `~/.tooloftruth/stats/YYYY-MM-DD.json`. Runs the **built** `monitor.js` (no experimental flags).
 - **Truth Scan**: Bing-html search via curl (DDG blocks curl) → decode Bing redirects → crawl4ai `crwl` fetch → evidence extraction → verdict.
 - **Tests**: 64/64 passing (vitest), core features verified.
+- **Release-readiness**: all 3 packages (`@tooloftruth/core`, `tooloftruth-mcp`, `tooloftruth`) pack cleanly, consumer-install from tarball verified (95 pkgs, 0 vulns). MCP server spawns + CLI `status` works from a clean `npm install`. Core bundled into mcp (`noExternal`) so no runtime `workspace:` dep leak.
 
 ### To activate sentinel on this machine
 1. `~/.tooloftruth/proxy.json` lists downstream servers (currently `echo` for smoke tests).
 2. Point your agent's MCP config to `tooloftruth-mcp` as the proxy.
 3. All proxied tool calls are intercepted, verified, and receipted.
+
+### Release checklist
+- [x] Packages build + tests pass (64/64)
+- [x] Tarballs pack clean (`npm pack` dry-run)
+- [x] Consumer install from tarball verified (`npm i ./tooloftruth-*.tgz`)
+- [x] CLI `status` works from clean install
+- [x] MCP server spawns from clean install
+- [x] Daemon runs built `monitor.js`
+- [ ] `npm login` + publish `@tooloftruth/core` → `tooloftruth-mcp` → `tooloftruth`
 
 ---
 

@@ -4,10 +4,11 @@
 // Usage: tooloftruth-run -- <command> [args...]
 // Records the command, runs it, logs the result.
 
-import { execSync } from "child_process";
+import { execSync, spawnSync } from "child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { fileURLToPath } from "url";
 
 const BASE_DIR = join(homedir(), ".tooloftruth");
 const RECEIPTS_DIR = join(BASE_DIR, "receipts");
@@ -131,6 +132,14 @@ function formatDuration(ms: number): string {
 
 function main() {
   const { command, commandArgs } = parseArgs(process.argv);
+
+  // Subcommands
+  if (command === "status" || command === "daemon") {
+    const __dirname = fileURLToPath(new URL(".", import.meta.url));
+    const statusScript = join(__dirname, "status.js");
+    const res = spawnSync(process.execPath, [statusScript, ...commandArgs], { stdio: "inherit" });
+    process.exit(res.status ?? 0);
+  }
 
   if (!command || command === "--help") {
     console.log("Tool of Truth — CLI Interception Wrapper");

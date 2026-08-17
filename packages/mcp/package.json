@@ -15,11 +15,11 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1",
-    "@tooloftruth/core": "workspace:*"
+    "@modelcontextprotocol/sdk": "^1.12.1"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "@tooloftruth/core": "workspace:*",
     "tsup": "^8.4.0",
     "typescript": "^5.7.0",
     "zod": "^4.4.3"
