@@ -3,6 +3,7 @@ import { watch, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync 
 import { join } from "path";
 import { homedir } from "os";
 import { appendFileSync } from "fs";
+import { execSync } from "child_process";
 import { createOpenCodeMonitor, scanForSensitiveData } from "@tooloftruth/core";
 import type { Detection } from "@tooloftruth/core";
 
@@ -32,6 +33,44 @@ function alertsFile(): string {
   return join(ALERTS_DIR, `${date}.jsonl`);
 }
 
+// Builds a self-contained, copy-pasteable alert block. When the user pastes
+// this into a chat, an agent has everything needed to investigate without
+// reaching into Tool of Truth internals.
+function buildAlertBlock(entry: Record<string, unknown>, detection: Detection, sourceDetail: string): string {
+  const flag = detection.severity === "critical" ? "🔴" : detection.severity === "warning" ? "🟡" : "ℹ️";
+  return [
+    "```alert",
+    `${flag} TOOL OF TRUTH ALERT`,
+    `severity:  ${detection.severity}`,
+    `category:  ${detection.category}`,
+    `rule:      ${detection.rule}`,
+    `confidence: ${Math.round(detection.confidence * 100)}%`,
+    `requiresReview: ${detection.requiresReview}`,
+    `source:    ${detection.source}`,
+    `sourceDetail: ${sourceDetail}`,
+    `timestamp: ${entry.timestamp}`,
+    `alertId:   ${entry.id}`,
+    `matched:   ${detection.matchRedacted}`,
+    `rawMatch:  ${JSON.stringify(detection.match)}`,
+    `context:   ${detection.context}`,
+    "",
+    "investigate: check the conversation log at ~/.tooloftruth/conversations/",
+    "and receipts at ~/.tooloftruth/receipts/ for this source.",
+    "```",
+  ].join("\n");
+}
+
+function notifySystem(title: string, body: string) {
+  try {
+    // macOS native notification. Escape for AppleScript.
+    const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    const script = `osascript -e 'display notification "${esc(body)}" with title "${esc(title)}"'`;
+    execSync(script, { timeout: 5000, stdio: "pipe" });
+  } catch {
+    // notifications are best-effort; never crash the daemon on failure
+  }
+}
+
 function logAlert(detection: Detection, sourceDetail: string) {
   const entry = {
     id: detection.id,
@@ -47,8 +86,22 @@ function logAlert(detection: Detection, sourceDetail: string) {
     context: detection.context,
   };
   appendFileSync(alertsFile(), JSON.stringify(entry) + "\n");
+
+  const block = buildAlertBlock(entry, detection, sourceDetail);
   const flag = detection.severity === "critical" ? "🔴" : detection.severity === "warning" ? "🟡" : "ℹ️";
   console.error(`[tooloftruth:daemon] ${flag} ${detection.category}:${detection.rule} (${detection.severity}) — ${detection.matchRedacted} @ ${detection.source}`);
+  // Log the full copyable block to a dedicated file the user can grab, and
+  // to stdout so it's visible if the daemon is run in a terminal.
+  appendFileSync(join(ALERTS_DIR, "latest-alert.txt"), block + "\n\n");
+  console.error("\n" + block);
+
+  // Native notification for critical + warning (skip info)
+  if (detection.severity !== "info") {
+    notifySystem(
+      `Tool of Truth: ${detection.category}:${detection.rule}`,
+      `${detection.severity.toUpperCase()} — ${detection.matchRedacted}`
+    );
+  }
 }
 
 function scanText(text: string, source: string) {
