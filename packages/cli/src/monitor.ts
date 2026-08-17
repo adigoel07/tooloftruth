@@ -59,6 +59,77 @@ function scanText(text: string, source: string) {
   }
 }
 
+// ─── Behavior ledger: per-session model/error-rate tracking ──
+const LEDGER_DIR = join(TOOLOFTRUTH_DIR, "ledger");
+if (!existsSync(LEDGER_DIR)) mkdirSync(LEDGER_DIR, { recursive: true });
+
+interface SessionBehavior {
+  sessionId: string;
+  model?: string;
+  messages: number;
+  toolCalls: number;
+  errors: number;
+  totalTokens: number;
+  costUsd: number;
+  firstSeen: string;
+  lastSeen: string;
+}
+
+function ledgerFile(): string {
+  const date = new Date().toISOString().slice(0, 10);
+  return join(LEDGER_DIR, `${date}.json`);
+}
+
+function loadLedger(): Record<string, SessionBehavior> {
+  try {
+    return JSON.parse(readFileSync(ledgerFile(), "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveLedger(ledger: Record<string, SessionBehavior>) {
+  writeFileSync(ledgerFile(), JSON.stringify(ledger, null, 2));
+}
+
+function updateLedger(msg: { sessionId: string; model?: string; role: string; tokens: { input: number; output: number }; toolCalls: { isError?: boolean }[]; cost: number }) {
+  const ledger = loadLedger();
+  const sid = msg.sessionId;
+  const entry = ledger[sid] || {
+    sessionId: sid,
+    messages: 0,
+    toolCalls: 0,
+    errors: 0,
+    totalTokens: 0,
+    costUsd: 0,
+    firstSeen: new Date().toISOString(),
+    lastSeen: new Date().toISOString(),
+  };
+  entry.model = msg.model || entry.model;
+  entry.messages++;
+  entry.toolCalls += msg.toolCalls.length;
+  entry.errors += msg.toolCalls.filter((t) => t.isError).length;
+  entry.totalTokens += msg.tokens.input + msg.tokens.output;
+  entry.costUsd += msg.cost || 0;
+  entry.lastSeen = new Date().toISOString();
+  ledger[sid] = entry;
+  saveLedger(ledger);
+}
+
+function formatLedger(ledger: Record<string, SessionBehavior>): string {
+  const lines = ["═══ Behavior Ledger ═══", ""];
+  for (const s of Object.values(ledger)) {
+    const errRate = s.toolCalls > 0 ? Math.round((s.errors / s.toolCalls) * 100) : 0;
+    lines.push(
+      `  ${s.sessionId.slice(0, 20)}\n` +
+      `    model: ${s.model || "-"}\n` +
+      `    msgs: ${s.messages}  tools: ${s.toolCalls}  errors: ${s.errors} (${errRate}%)\n` +
+      `    tokens: ${s.totalTokens}  cost: $${s.costUsd.toFixed(4)}`
+    );
+  }
+  return lines.join("\n");
+}
+
 interface Summary {
   windowStart: string;
   windowEnd: string;
@@ -131,6 +202,44 @@ function runOnce() {
   }
 }
 
+// ─── Git commit secret scanning (gitleaks) ───────────────────
+const GIT_SCAN_REPOS: string[] = (
+  process.env.TOOLOFTRUTH_GIT_SCAN || ""
+).split(",").filter(Boolean);
+
+async function scanGitRepos() {
+  if (GIT_SCAN_REPOS.length === 0) return;
+  const { gitleaksAvailable, runGitleaksScan } = await import("@tooloftruth/core");
+  if (!gitleaksAvailable()) return;
+  for (const repo of GIT_SCAN_REPOS) {
+    if (!existsSync(repo)) continue;
+    try {
+      const result = runGitleaksScan(repo, { noGit: false });
+      for (const f of result.findings) {
+        logAlert(
+          {
+            id: `gl_${f.Fingerprint || f.RuleID}`,
+            category: "secret",
+            rule: f.RuleID,
+            severity: "critical",
+            match: f.Secret,
+            matchRedacted: f.Secret.slice(0, 6) + "•••" + f.Secret.slice(-4),
+            start: 0,
+            end: f.Secret.length,
+            source: `gitleaks:${f.File}`,
+            confidence: 0.95,
+            requiresReview: false,
+            context: `${f.File}:${f.StartLine}:${f.StartColumn} — ${(f.Message || "").slice(0, 60)}`,
+          },
+          `${repo} commit ${(f.Commit || "").slice(0, 8)}`
+        );
+      }
+    } catch {
+      // skip
+    }
+  }
+}
+
 // ─── OpenCode conversation monitor ────────────────────────────
 let opencodeMonitor: ReturnType<typeof createOpenCodeMonitor> | null = null;
 
@@ -162,6 +271,16 @@ async function pollOpenCode() {
         toolCalls: msg.toolCalls,
       };
       logConversation(entry);
+
+      // Update behavior ledger
+      updateLedger({
+        sessionId: msg.sessionId,
+        model: msg.modelID,
+        role: msg.role,
+        tokens: msg.tokens,
+        toolCalls: msg.toolCalls,
+        cost: msg.cost,
+      });
 
       // Scan message text for sensitive data
       if (msg.text) {
@@ -217,6 +336,12 @@ initOpenCodeMonitor().then(() => {
   pollOpenCode();
   setInterval(pollOpenCode, Math.max(5000, POLL_MS / 2));
 });
+
+// Git repo secret scanning — every 5 min
+if (GIT_SCAN_REPOS.length > 0) {
+  scanGitRepos();
+  setInterval(scanGitRepos, 300000);
+}
 
 const unwatch = watch(RECEIPTS_DIR, (event, filename) => {
   if (filename && filename.endsWith(".jsonl")) runOnce();

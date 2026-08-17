@@ -656,6 +656,47 @@ server.tool(
 );
 
 server.tool(
+  "tooloftruth_ledger",
+  "Per-session behavior ledger: models used, message/tool-call counts, error rates, token usage, cost",
+  {},
+  async () => {
+    const { readFileSync, readdirSync } = await import("fs");
+    const ledgerDir = join(TOOLOFTRUTH_DIR, "ledger");
+    let ledger: Record<string, unknown> = {};
+    try {
+      const files = readdirSync(ledgerDir).filter((f) => f.endsWith(".json")).sort().reverse();
+      if (files.length > 0) {
+        ledger = JSON.parse(readFileSync(join(ledgerDir, files[0]), "utf-8"));
+      }
+    } catch {
+      ledger = {};
+    }
+    const sessions = Object.values(ledger);
+    const totalTokens = sessions.reduce((s, x) => s + (x as any).totalTokens || 0, 0);
+    const totalCost = sessions.reduce((s, x) => s + (x as any).costUsd || 0, 0);
+    const totalErrors = sessions.reduce((s, x) => s + (x as any).errors || 0, 0);
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify(
+            {
+              sessions: sessions.length,
+              totalTokens,
+              totalCostUsd: totalCost,
+              totalErrors,
+              bySession: sessions,
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  }
+);
+
+server.tool(
   "tooloftruth_truth_scan",
   "Scan text for factual claims, verify them against real web sources using Crawl4AI, and produce a truth report with scientific framework analysis",
   {
