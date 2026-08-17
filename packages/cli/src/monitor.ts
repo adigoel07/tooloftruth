@@ -63,20 +63,23 @@ function buildAlertBlock(entry: Record<string, unknown>, detection: Detection, s
 function notifySystem(title: string, body: string, openUrl?: string, alertId?: string) {
   try {
     const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-    // Prefer terminal-notifier: supports -open (opens URL on click) + -group
-    let script = `terminal-notifier -title "${esc(title)}" -message "${esc(body)}" -sound default`;
+    // Run in the active GUI session — launchd agents lack notification
+    // entitlement, so macOS suppresses banners. `launchctl asuser` re-enters
+    // the user's login session where notifications are permitted.
+    const uid = process.getuid?.() ?? 501;
+    let script = `launchctl asuser ${uid} /opt/homebrew/bin/terminal-notifier -title "${esc(title)}" -message "${esc(body)}" -sound default`;
     if (openUrl) script += ` -open "${esc(openUrl)}"`;
     if (alertId) script += ` -group "${esc(alertId)}"`;
-    script += ` -sender com.apple.ScriptEditor`;
-    execSync(script, { timeout: 5000, stdio: "pipe" });
-  } catch {
-    // Fallback to osascript if terminal-notifier isn't available
+    console.error(`[tooloftruth:daemon] notify: ${script.slice(0, 120)}`);
+    execSync(script, { timeout: 10000, stdio: "pipe" });
+  } catch (e) {
+    console.error(`[tooloftruth:daemon] terminal-notifier failed: ${(e as Error).message.slice(0, 200)} — falling back`);
     try {
       const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
       const script = `osascript -e 'display notification "${esc(body)}" with title "${esc(title)}"'`;
       execSync(script, { timeout: 5000, stdio: "pipe" });
-    } catch {
-      // best-effort; never crash the daemon
+    } catch (e2) {
+      console.error(`[tooloftruth:daemon] osascript fallback also failed: ${(e2 as Error).message.slice(0, 200)}`);
     }
   }
 }
