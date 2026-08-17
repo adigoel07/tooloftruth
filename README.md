@@ -80,6 +80,31 @@ Agent: [calls tooloftruth_satisfaction]
 Agent: User appears dissatisfied — result may be wrong
 ```
 
+## CLI
+
+```bash
+# Intercept and monitor non-MCP commands
+tooloftruth -- gh api repos/user/repo
+
+# One-shot status report (daemon health, receipts, cost, top tools)
+tooloftruth status
+```
+
+## Daemon
+
+A launchd daemon watches `.tooloftruth/receipts/`, aggregates daily stats, and alerts on fabrications.
+
+```bash
+# Install the daemon (macOS)
+launchctl load ~/Library/LaunchAgents/com.tooloftruth.daemon.plist
+```
+
+Stats are written to `.tooloftruth/stats/YYYY-MM-DD.json`.
+
+## Truth Scan
+
+`tooloftruth_truth_scan` does real web verification of claims: Bing search (curl) → crawl4ai fetch → evidence extraction → verdict.
+
 ## MCP Tools
 
 | Tool | Description |
@@ -92,6 +117,9 @@ Agent: User appears dissatisfied — result may be wrong
 | `tooloftruth_truth` | Full session truth report |
 | `tooloftruth_satisfaction` | Infer user satisfaction from message |
 | `tooloftruth_outcome` | Verify result matches user prompt |
+| `tooloftruth_audit` | Cross-reference agent claims against actual tool calls |
+| `tooloftruth_conversation` | View conversation log |
+| `tooloftruth_truth_scan` | Web research + fact-check a claim |
 
 ## How the MITM Proxy Works
 
@@ -108,17 +136,21 @@ Agent ←→ Tool of Truth ←→ MCP Server (downstream)
 
 ## Storage
 
-All data stays on your machine:
+All data stays in your machine's home directory:
 
 ```
-.tooloftruth/
+~/.tooloftruth/
 ├── config.json          ← settings
 ├── index.json           ← fast lookup index
 ├── proxy.json           ← downstream server config
-└── receipts/
-    ├── 2026-08-17.jsonl ← today's calls
+├── receipts/
+│   ├── 2026-08-17.jsonl ← today's calls
+│   └── ...
+├── conversations/
+│   └── 2026-08-17.jsonl ← claim/action conversations
+└── stats/               ← daemon aggregations
+    ├── 2026-08-17.json
     └── ...
-```
 
 ## Skill Manifests
 

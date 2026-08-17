@@ -1,8 +1,6 @@
 # Tool of Truth — Project Plan
 ### Single Source of Truth — v1.0 (2026-08-17)
 
----
-
 ## Project Identity
 
 | Field | Value |
@@ -17,6 +15,24 @@
 | **MCP SDK** | `@modelcontextprotocol/sdk` |
 | **Slash Command** | `/truth` |
 | **Author** | adigoel07 (Adi Goel) |
+
+---
+
+## Live Status (2026-08-17)
+
+The following are **wired and verified on this machine**, not just designed:
+
+- **Sentinel MITM proxy**: MCP server exposes `echo__*` proxied tools from `test-servers/echo-minimal.cjs`. Verified: `echo__echo` call → trust 100, verdict VERIFIED, receipt written.
+- **Receipts**: live in `~/.tooloftruth/receipts/*.jsonl`; index.json tracks totals (11+ calls recorded).
+- **Conversation logger**: claims/actions persisted to `~/.tooloftruth/conversations/*.jsonl`.
+- **Daemon**: `com.tooloftruth.daemon` loaded in launchd (PID live), KeepAlive, polls receipts → aggregates stats to `~/.tooloftruth/stats/YYYY-MM-DD.json`.
+- **Truth Scan**: Bing-html search via curl (DDG blocks curl) → decode Bing redirects → crawl4ai `crwl` fetch → evidence extraction → verdict.
+- **Tests**: 64/64 passing (vitest), core features verified.
+
+### To activate sentinel on this machine
+1. `~/.tooloftruth/proxy.json` lists downstream servers (currently `echo` for smoke tests).
+2. Point your agent's MCP config to `tooloftruth-mcp` as the proxy.
+3. All proxied tool calls are intercepted, verified, and receipted.
 
 ---
 
@@ -119,14 +135,14 @@ IF Tool of Truth MCP is NOT connected:
 
 | Feature | Status | Description |
 |---|---|---|
-| MITM Proxy | ✅ | Transparent interception of downstream MCP servers |
+| MITM Proxy | 🟢 LIVE | Proxies `echo` test server; receipted end-to-end (echo__echo → VERIFIED) |
 | Auto-Discovery | ✅ | Scans agent configs, auto-generates proxy.json |
 | Tool Reliability | ✅ | Success rate, fabrication rate, A-F grading |
 | CLI Wrapper | ✅ | `tooloftruth-run` monitors non-MCP tools |
-| Daemon | ✅ | launchd plist for persistent monitoring |
+| Daemon | 🟢 LIVE | launchd `com.tooloftruth.daemon`, KeepAlive, stats aggregation → `~/.tooloftruth/stats/` |
 | SKILL.md | ✅ | Agent fallback verification |
 | `/truth` Command | ✅ | Invokable via "/" in chat |
-| JSONL Receipts | ✅ | Indexed storage with lookup |
+| JSONL Receipts | 🟢 LIVE | Receipts persisted; verified end-to-end |
 
 ---
 

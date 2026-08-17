@@ -1,19 +1,21 @@
 {
-  "name": "tooloftruth-run",
+  "name": "tooloftruth",
   "version": "0.1.0",
-  "description": "Tool of Truth CLI interception wrapper — monitor non-MCP tool usage",
+  "description": "Every tool call, proven. — Verification sentinel for AI agent tool usage.",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "tooloftruth-run": "./dist/index.js"
+    "tooloftruth": "./dist/index.js",
+    "tooloftruth-status": "./dist/status.js"
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --clean",
-    "dev": "tsup src/index.ts --format esm --watch",
+    "build": "tsup src/index.ts src/status.ts src/monitor.ts --format esm --clean",
+    "dev": "tsup src/index.ts src/status.ts src/monitor.ts --format esm --watch",
     "clean": "rm -rf dist",
     "prepublishOnly": "pnpm build"
   },
   "devDependencies": {
+    "@types/node": "^26.2.0",
     "tsup": "^8.4.0",
     "typescript": "^5.7.0"
   }
