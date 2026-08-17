@@ -42,13 +42,13 @@ npm install -g tooloftruth-mcp
 ### 3. Connect (Option B: Proxy — MITM mode)
 
 ```json
-// Your agent's MCP config
+// Your agent's MCP config — proxy a single downstream server
 {
-  "tooloftruth": {
-    "command": "tooloftruth-mcp"
-  }
+  "firecrawl": { "command": "npx", "args": ["tooloftruth-mcp", "firecrawl"] }
 }
 ```
+
+Or proxy every local MCP server via `~/.tooloftruth/proxy.json`:
 
 ```json
 // ~/.tooloftruth/proxy.json
@@ -59,6 +59,24 @@ npm install -g tooloftruth-mcp
   }
 }
 ```
+
+### Skill Manifests (enforced)
+
+Manifests in `~/.tooloftruth/manifests/<skill>.json` **gate** tool calls:
+
+```json
+{
+  "skill": "echo",
+  "version": "1.0.0",
+  "requires": {
+    "echo": { "tool": "echo", "must_be_called": true, "expected_args": { "message": "" } }
+  },
+  "outputRules": ["Output must contain \"Echo:\""],
+  "max_cost": 1.0
+}
+```
+
+Undeclared tools are blocked (`BLOCKED_BY_MANIFEST`); arg/pattern/cost/output-rule violations are recorded and downgrade the verdict.
 
 ### 4. Use
 

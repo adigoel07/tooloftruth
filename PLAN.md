@@ -22,12 +22,14 @@
 
 The following are **wired and verified on this machine**, not just designed:
 
-- **Sentinel MITM proxy**: MCP server exposes `echo__*` proxied tools from `test-servers/echo-minimal.cjs`. Verified: `echo__echo` call → trust 100, verdict VERIFIED, receipt written.
+- **Sentinel MITM proxy**: MCP server exposes `echo__*` proxied tools from `test-servers/echo-minimal.cjs`. Verified: `echo__echo` call → trust 100, verdict VERIFIED, receipt written. Supports `npx tooloftruth-mcp <server>` to proxy a single downstream.
+- **Manifest enforcement (LIVE)**: skill manifests now GATE calls. Undeclared tool → `BLOCKED_BY_MANIFEST`; arg/pattern/cost/output-rule violations recorded; verdict downgraded on errors. Verified: `echo__add` blocked (not in manifest), `echo__echo` allowed.
+- **Real cost (LIVE)**: proxied calls compute cost via `calculateCost` (firecrawl $0.01/call, token-based for LLM providers). No more hardcoded `costUsd: 0`.
 - **Receipts**: live in `~/.tooloftruth/receipts/*.jsonl`; index.json tracks totals (11+ calls recorded).
 - **Conversation logger**: claims/actions persisted to `~/.tooloftruth/conversations/*.jsonl`.
 - **Daemon**: `com.tooloftruth.daemon` loaded in launchd (PID live), KeepAlive, polls receipts → aggregates stats to `~/.tooloftruth/stats/YYYY-MM-DD.json`. Runs the **built** `monitor.js` (no experimental flags).
 - **Truth Scan**: Bing-html search via curl (DDG blocks curl) → decode Bing redirects → crawl4ai `crwl` fetch → evidence extraction → verdict.
-- **Tests**: 66/66 passing (vitest), core features verified. Fabrication detector fixed to not flag sub-ms local stdio tools (verified: proxied echo → VERIFIED/100, not SUSPICIOUS).
+- **Tests**: 72/72 passing (vitest), core features verified. Fabrication detector fixed to not flag sub-ms local stdio tools (verified: proxied echo → VERIFIED/100, not SUSPICIOUS).
 - **Release-readiness**: all 3 packages (`@tooloftruth/core`, `tooloftruth-mcp`, `tooloftruth`) pack cleanly, consumer-install from tarball verified (95 pkgs, 0 vulns). MCP server spawns + CLI `status` works from a clean `npm install`. Core bundled into mcp (`noExternal`) so no runtime `workspace:` dep leak.
 
 ### To activate sentinel on this machine
@@ -36,7 +38,7 @@ The following are **wired and verified on this machine**, not just designed:
 3. All proxied tool calls are intercepted, verified, and receipted.
 
 ### Release checklist
-- [x] Packages build + tests pass (64/64)
+- [x] Packages build + tests pass (72/72)
 - [x] Tarballs pack clean (`npm pack` dry-run)
 - [x] Consumer install from tarball verified (`npm i ./tooloftruth-*.tgz`)
 - [x] CLI `status` works from clean install
