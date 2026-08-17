@@ -151,13 +151,34 @@ function main() {
   // Print summary
   const status = isError ? "✗" : "✓";
   const duration = formatDuration(durationMs);
-  console.log(`\n[Tool of Truth] ${status} ${command} — ${duration} — trust ${record.verification.trustScore}/100`);
 
-  // Output the real command output
+  // Format output nicely
+  let formattedOutput = "";
   if (output) {
-    process.stdout.write(output);
+    try {
+      const parsed = JSON.parse(output);
+      formattedOutput = JSON.stringify(parsed, null, 2);
+    } catch {
+      formattedOutput = output.trim();
+    }
   }
 
+  console.log(`\n[Tool of Truth] ${status} ${command} — ${duration} — trust ${record.verification.trustScore}/100`);
+  console.log("─".repeat(60));
+
+  if (formattedOutput) {
+    // Truncate long output
+    if (formattedOutput.length > 2000) {
+      const lines = formattedOutput.split("\n");
+      const truncated = lines.slice(0, 30).join("\n");
+      console.log(truncated);
+      console.log(`\n... (${lines.length - 30} more lines, ${formattedOutput.length} chars total)`);
+    } else {
+      console.log(formattedOutput);
+    }
+  }
+
+  console.log("─".repeat(60));
   process.exit(exitCode);
 }
 
