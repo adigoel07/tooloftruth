@@ -29,8 +29,15 @@ function makeRecord(overrides: Partial<ToolCallRecord> = {}): ToolCallRecord {
 }
 
 describe("Deep Fabrication Detection", () => {
-  it("detects zero-duration calls", () => {
+  it("does NOT flag zero-duration calls when a result was returned (sub-ms local tool)", () => {
     const record = makeRecord({ durationMs: 0 });
+    const signals = detectDeepFabrication(record);
+    const noTrace = signals.find((s) => s.name === "no_execution_trace");
+    expect(noTrace?.triggered).toBe(false);
+  });
+
+  it("flags zero-duration calls with NO result (no execution trace)", () => {
+    const record = makeRecord({ durationMs: 0, result: null as unknown as Record<string, unknown> });
     const signals = detectDeepFabrication(record);
     const noTrace = signals.find((s) => s.name === "no_execution_trace");
     expect(noTrace?.triggered).toBe(true);
@@ -43,11 +50,22 @@ describe("Deep Fabrication Detection", () => {
     expect(noTrace?.triggered).toBe(false);
   });
 
-  it("detects suspiciously fast responses", () => {
+  it("does NOT flag fast responses when a result was returned (local stdio tool)", () => {
     const record = makeRecord({ durationMs: 5 });
     const signals = detectDeepFabrication(record);
     const fast = signals.find((s) => s.name === "timing_too_fast");
+    const noNetwork = signals.find((s) => s.name === "no_network_activity");
+    expect(fast?.triggered).toBe(false);
+    expect(noNetwork?.triggered).toBe(false);
+  });
+
+  it("flags fast responses with NO result (implausible)", () => {
+    const record = makeRecord({ durationMs: 5, result: null as unknown as Record<string, unknown> });
+    const signals = detectDeepFabrication(record);
+    const fast = signals.find((s) => s.name === "timing_too_fast");
+    const noNetwork = signals.find((s) => s.name === "no_network_activity");
     expect(fast?.triggered).toBe(true);
+    expect(noNetwork?.triggered).toBe(true);
   });
 
   it("detects placeholder patterns", () => {

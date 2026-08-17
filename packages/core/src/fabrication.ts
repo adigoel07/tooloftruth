@@ -22,14 +22,18 @@ export function detectDeepFabrication(
   const signals: FabricationSignal[] = [];
 
   // 1. No execution trace
+  // A recorded call WITH a result proves execution even if durationMs rounds
+  // to 0 (sub-millisecond local stdio tools). Only flag when there is truly
+  // no result and no duration — the signature of a fabricated claim.
+  const hasResult = record.result !== null && record.result !== undefined;
+  const noTrace = record.durationMs === 0 && !hasResult;
   signals.push({
     name: "no_execution_trace",
     weight: 0.35,
-    triggered: record.durationMs === 0,
-    detail:
-      record.durationMs === 0
-        ? "No execution trace found — agent may have fabricated"
-        : `Execution trace present (${record.durationMs}ms)`,
+    triggered: noTrace,
+    detail: noTrace
+      ? "No execution trace found — agent may have fabricated"
+      : `Execution trace present (${record.durationMs}ms)`,
   });
 
   // 2. Output matches documentation too closely
@@ -54,26 +58,31 @@ export function detectDeepFabrication(
   }
 
   // 3. No network activity (no HTTP calls during tool execution)
-  // In proxy mode, we check if the downstream server made network requests
-  const hasNetworkEvidence = record.durationMs > 50; // heuristic: real API calls take > 50ms
+  // In proxy mode, we check if the downstream server made network requests.
+  // Local stdio MCP tools legitimately return in <50ms — only flag when there
+  // is NO result AND suspiciously fast (a real call returns *something*).
+  const timingImplausible = record.durationMs > 0 && record.durationMs < 30 && !hasResult;
   signals.push({
     name: "no_network_activity",
     weight: 0.15,
-    triggered: !hasNetworkEvidence && record.durationMs > 0,
-    detail: hasNetworkEvidence
-      ? "Network activity likely (duration > 50ms)"
-      : "No network activity detected",
+    triggered: timingImplausible,
+    detail: timingImplausible
+      ? "No result returned in suspiciously short time"
+      : "Network activity likely (result returned)",
   });
 
   // 4. Timing too fast for real API
+  // A returned result at <30ms is NOT fabrication for local stdio tools —
+  // it provably executed. Timing heuristics only apply to *claimed* remote
+  // calls; a call that returned a result was executed, so it's not fabricated.
+  const timingTooFast = record.durationMs > 0 && record.durationMs < 30 && !hasResult;
   signals.push({
     name: "timing_too_fast",
     weight: 0.10,
-    triggered: record.durationMs > 0 && record.durationMs < 30,
-    detail:
-      record.durationMs > 0 && record.durationMs < 30
-        ? `Response in ${record.durationMs}ms — suspiciously fast for API call`
-        : "Timing within normal range",
+    triggered: timingTooFast,
+    detail: timingTooFast
+      ? `Response in ${record.durationMs}ms with no result — implausible for real call`
+      : "Timing within normal range",
   });
 
   // 5. No file system changes (tool should create files but didn't)
