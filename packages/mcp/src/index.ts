@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
 import { join } from "path";
 import { homedir } from "os";
 import {
@@ -12,7 +13,7 @@ import {
   formatReceiptHuman,
   calculateCost,
 } from "@tooloftruth/core";
-import type { ToolCallRecord, TokenUsage, SkillManifest } from "@tooloftruth/core";
+import type { ToolCallRecord, TokenUsage } from "@tooloftruth/core";
 
 const TOOLOFTRUTH_DIR = join(homedir(), ".tooloftruth");
 
@@ -59,7 +60,7 @@ function recordToolCall(
   };
 
   const manifest = manifests.get(server);
-  verifier.verifyToolCall(record, manifest).then((v) => {
+  verifier.verifyToolCall(record, manifest).then((v: import("@tooloftruth/core").VerificationResult) => {
     record.verification = v;
   });
 
@@ -76,7 +77,7 @@ const server = new McpServer({
 server.tool(
   "tooloftruth_verify",
   "Verify that a specific tool was actually used in this session",
-  { tool: { type: "string", description: "Name of the tool to verify" } },
+  { tool: z.string().describe("Name of the tool to verify") },
   async ({ tool }) => {
     const calls = toolCalls.filter((c) => c.tool === tool);
     const latest = calls[calls.length - 1];
@@ -131,7 +132,7 @@ server.tool(
 server.tool(
   "tooloftruth_check",
   "Pre-flight check: is a tool installed and configured?",
-  { tool: { type: "string", description: "Name of the tool to check" } },
+  { tool: z.string().describe("Name of the tool to check") },
   async ({ tool }) => {
     const result = await verifier.checkPreflight(tool);
     return {
@@ -149,12 +150,8 @@ server.tool(
   "tooloftruth_receipt",
   "Generate or view a verification receipt",
   {
-    action: {
-      type: "string",
-      description: "generate | view | list",
-      enum: ["generate", "view", "list"],
-    },
-    receiptId: { type: "string", description: "Receipt ID (for view)" },
+    action: z.enum(["generate", "view", "list"]).describe("Action to perform"),
+    receiptId: z.string().optional().describe("Receipt ID (for view)"),
   },
   async ({ action, receiptId }) => {
     if (action === "generate") {
@@ -209,13 +206,11 @@ server.tool(
   "tooloftruth_cost",
   "Get cost breakdown for tool usage in this session",
   {
-    period: {
-      type: "string",
-      description: "session | day | week",
-      enum: ["session", "day", "week"],
-      default: "session",
-    },
-    tool: { type: "string", description: "Filter by specific tool" },
+    period: z
+      .enum(["session", "day", "week"])
+      .default("session")
+      .describe("Time period"),
+    tool: z.string().optional().describe("Filter by specific tool"),
   },
   async ({ tool }) => {
     const filtered = tool
@@ -238,12 +233,16 @@ server.tool(
   "tooloftruth_history",
   "Search historical verification receipts",
   {
-    tool: { type: "string", description: "Filter by tool" },
-    limit: { type: "number", description: "Max results", default: 20 },
+    tool: z.string().optional().describe("Filter by tool"),
+    limit: z.number().default(20).describe("Max results"),
   },
   async ({ tool, limit }) => {
-    const maxResults = limit || 20;
-    let records = tool ? store.queryTool(tool) : store.getStats().totalCalls > 0 ? toolCalls : [];
+    const maxResults = limit;
+    let records = tool
+      ? store.queryTool(tool)
+      : store.getStats().totalCalls > 0
+        ? toolCalls
+        : [];
 
     records = records.slice(-maxResults);
 
@@ -254,7 +253,7 @@ server.tool(
           text: JSON.stringify(
             {
               count: records.length,
-              records: records.map((r) => ({
+              records: records.map((r: ToolCallRecord) => ({
                 id: r.id,
                 tool: r.tool,
                 timestamp: r.timestamp,

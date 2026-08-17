@@ -23,7 +23,7 @@ export interface VerificationResult {
   schemaValid: boolean;
   responsePlausible: boolean;
   trustScore: number;
-  verdict: "VERIFIED" | "SUSPICIOUS" | "FABRICATION";
+  verdict: "VERIFIED" | "SUSPICIOUS" | "FABRICATION" | "UNVERIFIABLE";
   fabricationConfidence: number;
   checksPerformed: string[];
 }

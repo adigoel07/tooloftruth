@@ -25,7 +25,7 @@ export class Verifier {
     const issues: string[] = [];
     const suggestions: string[] = [];
 
-    const installed = await this.checkInstalled(tool);
+    const installed = this.checkInstalled(tool);
     if (!installed) {
       issues.push(`${tool} is not installed`);
       suggestions.push(`Install ${tool} and try again`);
@@ -42,16 +42,16 @@ export class Verifier {
     return {
       installed,
       configured,
-      version: await this.getVersion(tool),
+      version: this.getVersion(tool),
       endpoint,
       issues,
       suggestions,
     };
   }
 
-  private async checkInstalled(tool: string): Promise<boolean> {
+  private checkInstalled(tool: string): boolean {
     try {
-      const { execSync } = await import("child_process");
+      const { execSync } = require("child_process") as typeof import("child_process");
       execSync(`which ${tool} 2>/dev/null`, { stdio: "pipe" });
       return true;
     } catch {
@@ -63,9 +63,9 @@ export class Verifier {
     return true;
   }
 
-  private async getVersion(tool: string): Promise<string | null> {
+  private getVersion(tool: string): string | null {
     try {
-      const { execSync } = await import("child_process");
+      const { execSync } = require("child_process") as typeof import("child_process");
       const out = execSync(`${tool} --version 2>/dev/null`, {
         stdio: "pipe",
       }).toString();
