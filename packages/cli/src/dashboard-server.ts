@@ -4,14 +4,15 @@ import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { execSync } from "child_process";
+import { DASHBOARD_HTML } from "./dashboard-html.js";
 
-// Tool of Truth — local dashboard server
+// Tool of Truth — local dashboard server (folded into CLI package)
 // Reads ~/.tooloftruth/* and serves a single-file, zero-dep dashboard.
 
 const TOOLOFTRUTH_DIR = process.env.TOOLOFTRUTH_DIR || join(homedir(), ".tooloftruth");
 const PORT = Number(process.env.TOOLOFTRUTH_PORT || 4321);
 
-function readJsonLines(dir: string, filePrefix = ""): any[] {
+function readJsonLines(dir: string): any[] {
   const out: any[] = [];
   const full = join(TOOLOFTRUTH_DIR, dir);
   if (!existsSync(full)) return out;
@@ -71,59 +72,62 @@ function apiData(): any {
   };
 }
 
-const server = createServer((req, res) => {
-  const url = (req.url || "/").split("?")[0];
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
+export function startDashboardServer(port: number = PORT): void {
+  const server = createServer((req, res) => {
+    const url = (req.url || "/").split("?")[0];
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
-  // ─── JSON API ───────────────────────────────────────────────
-  if (url === "/api/data") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(apiData()));
-    return;
-  }
-
-  if (url === "/api/gitleaks") {
-    const repoPath = decodeURIComponent((req.url || "").split("=")[1] || "");
-    if (!repoPath) { res.writeHead(400); res.end(JSON.stringify({ error: "repoPath required" })); return; }
-    try {
-      const output = execSync(`gitleaks git "${repoPath}" --no-banner --redact=0 --report-format=json --report-path=/tmp/gitleaks-dash-report.json`, { encoding: "utf-8", timeout: 60000, stdio: ["pipe","pipe","pipe"] });
-      const report = existsSync("/tmp/gitleaks-dash-report.json") ? JSON.parse(readFileSync("/tmp/gitleaks-dash-report.json","utf-8")) : [];
+    if (url === "/api/data") {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ findings: Array.isArray(report) ? report : [] }));
-    } catch (e: any) {
-      // gitleaks exits non-zero on leaks; report still written
+      res.end(JSON.stringify(apiData()));
+      return;
+    }
+
+    if (url === "/api/gitleaks") {
+      const repoPath = decodeURIComponent((req.url || "").split("=")[1] || "");
+      if (!repoPath) { res.writeHead(400); res.end(JSON.stringify({ error: "repoPath required" })); return; }
+      const reportPath = `/tmp/gitleaks-dash-${process.pid}.json`;
       try {
-        const report = existsSync("/tmp/gitleaks-dash-report.json") ? JSON.parse(readFileSync("/tmp/gitleaks-dash-report.json","utf-8")) : [];
+        execSync(`gitleaks git "${repoPath}" --no-banner --redact=0 --report-format=json --report-path=${reportPath}`, { encoding: "utf-8", timeout: 60000, stdio: ["pipe","pipe","pipe"] });
+      } catch {
+        // gitleaks exits non-zero on findings; report still written
+      }
+      try {
+        const report = existsSync(reportPath) ? JSON.parse(readFileSync(reportPath, "utf-8")) : [];
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ findings: Array.isArray(report) ? report : [] }));
       } catch {
         res.writeHead(500); res.end(JSON.stringify({ error: "gitleaks failed" }));
       }
+      return;
     }
-    return;
-  }
 
-  // ─── Serve the dashboard (single HTML) ──────────────────────
-  if (url === "/" || url === "/index.html") {
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(DASHBOARD_HTML);
-    return;
-  }
+    if (url === "/" || url === "/index.html") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(DASHBOARD_HTML);
+      return;
+    }
 
-  res.writeHead(404); res.end("not found");
-});
+    if (url === "/favicon.ico") {
+      // Inline SVG favicon (brand needle)
+      const favicon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#0A0A0A" stroke="#F6F4EF"/><line x1="12" y1="12" x2="16" y2="6" stroke="#10B981" stroke-width="2"/></svg>`;
+      res.writeHead(200, { "Content-Type": "image/svg+xml" });
+      res.end(favicon);
+      return;
+    }
 
-// The dashboard is inlined from a separate file at build time.
-let DASHBOARD_HTML = "";
-try {
-  const dashPath = join(import.meta.dirname ?? __dirname, "..", "src", "dashboard.html");
-  DASHBOARD_HTML = readFileSync(dashPath, "utf-8");
-} catch {
-  DASHBOARD_HTML = "<h1>Dashboard not found — rebuild package</h1>";
+    res.writeHead(404); res.end("not found");
+  });
+
+  server.listen(port, "127.0.0.1", () => {
+    console.error(`[tooloftruth:dashboard] http://localhost:${port}`);
+  });
 }
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.error(`[tooloftruth:dashboard] http://localhost:${PORT}`);
-});
+// Direct execution: `node server.js` or `tooloftruth dashboard`
+const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/^file:\/\//, ""));
+if (isMain || process.env.TOOLOFTRUTH_START_DASHBOARD === "1") {
+  startDashboardServer(PORT);
+}

@@ -9,6 +9,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { join } from "path";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
+import { startDashboardServer } from "./dashboard-server.js";
 
 const BASE_DIR = join(homedir(), ".tooloftruth");
 const RECEIPTS_DIR = join(BASE_DIR, "receipts");
@@ -141,17 +142,30 @@ function main() {
     process.exit(res.status ?? 0);
   }
 
+  // `tooloftruth dashboard` — start the local dashboard server
+  if (command === "dashboard") {
+    const port = Number(commandArgs[0] || process.env.TOOLOFTRUTH_PORT || 4321);
+    console.log(`Tool of Truth dashboard → http://localhost:${port}`);
+    startDashboardServer(port);
+    // Keep the process alive; it exits on Ctrl+C
+    return;
+  }
+
   if (!command || command === "--help") {
-    console.log("Tool of Truth — CLI Interception Wrapper");
+    console.log("Tool of Truth — CLI");
     console.log("");
-    console.log("Usage: tooloftruth-run -- <command> [args...]");
+    console.log("Usage: tooloftruth <command>");
+    console.log("");
+    console.log("Commands:");
+    console.log("  tooloftruth status              Show daemon health, receipts, cost");
+    console.log("  tooloftruth dashboard [port]    Open the local dashboard (default :4321)");
+    console.log("  tooloftruth-run -- <command>    Wrap a CLI command and record it");
     console.log("");
     console.log("Examples:");
+    console.log("  tooloftruth status");
+    console.log("  tooloftruth dashboard");
     console.log("  tooloftruth-run -- gh api repos/user/repo");
-    console.log("  tooloftruth-run -- curl https://api.example.com/data");
-    console.log("  tooloftruth-run -- docker ps");
     console.log("");
-    console.log("Records the command, runs it, logs the result to Tool of Truth.");
     process.exit(0);
   }
 

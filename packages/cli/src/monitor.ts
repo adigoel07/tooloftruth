@@ -3,12 +3,9 @@ import { watch, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync 
 import { join } from "path";
 import { homedir } from "os";
 import { appendFileSync } from "fs";
-import { execSync, spawn } from "child_process";
-import { fileURLToPath } from "url";
+import { execSync } from "child_process";
 import { createOpenCodeMonitor, scanForSensitiveData } from "@tooloftruth/core";
 import type { Detection } from "@tooloftruth/core";
-
-const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
 const TOOLOFTRUTH_DIR = process.env.TOOLOFTRUTH_DIR || join(homedir(), ".tooloftruth");
 const RECEIPTS_DIR = join(TOOLOFTRUTH_DIR, "receipts");
@@ -389,16 +386,12 @@ runOnce();
 setInterval(runOnce, POLL_MS);
 
 // ─── Dashboard server (localhost, spawned alongside daemon) ──
-function startDashboard() {
-  const dashPath = process.env.TOOLOFTRUTH_DASHBOARD || join(__dirname, "..", "..", "dashboard", "dist", "server.js");
-  if (!existsSync(dashPath)) return;
+async function startDashboard() {
   try {
-    const child = spawn(process.execPath, [dashPath], {
-      stdio: "ignore",
-      detached: true,
-    });
-    child.unref();
-    console.error("[tooloftruth:daemon] Dashboard started on http://localhost:4321");
+    const { startDashboardServer } = await import("./dashboard-server.js");
+    const port = Number(process.env.TOOLOFTRUTH_PORT || 4321);
+    startDashboardServer(port);
+    console.error(`[tooloftruth:daemon] Dashboard started on http://localhost:${port}`);
   } catch (e) {
     console.error(`[tooloftruth:daemon] Dashboard start failed: ${(e as Error).message}`);
   }

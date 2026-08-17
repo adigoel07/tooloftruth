@@ -1,7 +1,7 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/index.ts", "src/status.ts", "src/monitor.ts"],
+  entry: ["src/index.ts", "src/status.ts", "src/monitor.ts", "src/dashboard-server.ts"],
   format: ["esm"],
   clean: true,
   noExternal: [/@tooloftruth\/core/],
