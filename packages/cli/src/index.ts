@@ -48,6 +48,64 @@ function parseArgs(args: string[]): { command: string; commandArgs: string[] } {
   return { command: command || "unknown", commandArgs };
 }
 
+function summarizeJsonOutput(command: string, data: unknown): string {
+  if (!data || typeof data !== "object") return String(data);
+
+  const obj = data as Record<string, unknown>;
+
+  // GitHub API: repo info
+  if (obj.full_name && obj.stargazers_count !== undefined) {
+    const repo = obj;
+    const lines = [
+      `Repository: ${repo.full_name}`,
+      `  ${repo.description || "No description"}`,
+      `  ★ ${repo.stargazers_count}  ⑂ ${repo.forks_count}  ${repo.language || "N/A"}`,
+      `  ${repo.html_url}`,
+    ];
+    return lines.join("\n");
+  }
+
+  // GitHub API: user info
+  if (obj.login && obj.followers !== undefined) {
+    return `User: ${obj.login} (${obj.name || "—"})\n  ${obj.bio || "No bio"}\n  ★ ${obj.followers} followers  ⑂ ${obj.public_repos} repos`;
+  }
+
+  // GitHub API: list of repos
+  if (Array.isArray(data) && data.length > 0 && data[0].full_name) {
+    const repos = data.slice(0, 5).map(
+      (r: Record<string, unknown>) => `  ${r.full_name} — ★ ${r.stargazers_count}`
+    );
+    return `Repositories (${data.length} total):\n${repos.join("\n")}${data.length > 5 ? `\n  ... +${data.length - 5} more` : ""}`;
+  }
+
+  // GitHub API: issues/PRs list
+  if (Array.isArray(data) && data.length > 0 && data[0].title) {
+    const items = data.slice(0, 5).map(
+      (i: Record<string, unknown>) => `  #${i.number} ${i.title} [${i.state}]`
+    );
+    return `Issues/PRs (${data.length} total):\n${items.join("\n")}${data.length > 5 ? `\n  ... +${data.length - 5} more` : ""}`;
+  }
+
+  // Docker: container list
+  if (Array.isArray(data) && data.length > 0 && data[0].Names) {
+    return `Containers: ${data.length} running`;
+  }
+
+  // Generic array
+  if (Array.isArray(data)) {
+    return `Array: ${data.length} items`;
+  }
+
+  // Generic object — show top-level keys
+  const keys = Object.keys(obj).slice(0, 8);
+  const preview = keys.map((k) => {
+    const v = obj[k];
+    const val = typeof v === "object" ? JSON.stringify(v).slice(0, 60) : String(v).slice(0, 60);
+    return `  ${k}: ${val}`;
+  });
+  return preview.join("\n") + (Object.keys(obj).length > 8 ? `\n  ... +${Object.keys(obj).length - 8} more fields` : "");
+}
+
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
@@ -151,34 +209,36 @@ function main() {
   // Print summary
   const status = isError ? "✗" : "✓";
   const duration = formatDuration(durationMs);
+  const fullCommand = [command, ...commandArgs].join(" ");
 
-  // Format output nicely
-  let formattedOutput = "";
-  if (output) {
+  // Parse output for smart summary
+  let summary = "";
+  if (output && !isError) {
     try {
       const parsed = JSON.parse(output);
-      formattedOutput = JSON.stringify(parsed, null, 2);
+      summary = summarizeJsonOutput(command, parsed);
     } catch {
-      formattedOutput = output.trim();
+      // Not JSON — show first few lines
+      const lines = output.trim().split("\n");
+      if (lines.length <= 5) {
+        summary = lines.join("\n");
+      } else {
+        summary = lines.slice(0, 3).join("\n") + `\n  ... +${lines.length - 3} lines`;
+      }
     }
+  } else if (isError && output) {
+    summary = output.trim().split("\n").slice(0, 3).join("\n");
   }
 
-  console.log(`\n[Tool of Truth] ${status} ${command} — ${duration} — trust ${record.verification.trustScore}/100`);
-  console.log("─".repeat(60));
-
-  if (formattedOutput) {
-    // Truncate long output
-    if (formattedOutput.length > 2000) {
-      const lines = formattedOutput.split("\n");
-      const truncated = lines.slice(0, 30).join("\n");
-      console.log(truncated);
-      console.log(`\n... (${lines.length - 30} more lines, ${formattedOutput.length} chars total)`);
-    } else {
-      console.log(formattedOutput);
-    }
+  // Print
+  console.log("");
+  console.log(`  ${status} ${fullCommand}`);
+  console.log(`    ${duration}  ·  trust ${record.verification.trustScore}/100  ·  ${isError ? `exit ${exitCode}` : "success"}`);
+  if (summary) {
+    console.log("");
+    console.log("  " + summary.split("\n").join("\n  "));
   }
-
-  console.log("─".repeat(60));
+  console.log("");
   process.exit(exitCode);
 }
 

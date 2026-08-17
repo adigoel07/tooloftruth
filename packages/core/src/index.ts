@@ -46,12 +46,6 @@ export {
 } from "./satisfaction.js";
 export type { SatisfactionResult } from "./satisfaction.js";
 export {
-  checkCostAlerts,
-  shouldBlockCall,
-  formatAlerts,
-} from "./alerts.js";
-export type { CostAlert, BudgetConfig } from "./alerts.js";
-export {
   calculateReliability,
   formatReliability,
 } from "./reliability.js";
