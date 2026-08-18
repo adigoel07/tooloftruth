@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { checkCostAlerts, shouldBlockCall, formatAlerts } from "../alerts.js";
-import type { ToolCallRecord, BudgetConfig } from "../types.js";
+import type { BudgetConfig } from "../alerts.js";
+import type { ToolCallRecord } from "../types.js";
 
 function makeRecord(tool: string, costUsd: number, timestamp?: string): ToolCallRecord {
   return {

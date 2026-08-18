@@ -4,7 +4,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { appendFileSync } from "fs";
 import { execSync } from "child_process";
-import { createOpenCodeMonitor, scanForSensitiveData, detectFilesystemActions, loadAlertConfig, shouldAlert, shouldNotify } from "@tooloftruth/core";
+import { createOpenCodeMonitor, scanForSensitiveData, detectFilesystemActions, loadAlertConfig, shouldAlert, shouldNotify, checkBudgetCrossing, formatBudgetStatus, checkCostAlerts, loadBudgetConfig } from "@tooloftruth/core";
 import type { Detection } from "@tooloftruth/core";
 
 const TOOLOFTRUTH_DIR = process.env.TOOLOFTRUTH_DIR || join(homedir(), ".tooloftruth");
@@ -127,12 +127,30 @@ function logAlert(detection: Detection, sourceDetail: string, sessionId?: string
   }
 }
 
-function scanText(text: string, source: string, sessionId?: string) {
-  if (!text || text.length < 3) return;
+function scanText(text: string, source: string, sessionId?: string): number {
+  if (!text || text.length < 3) return 0;
   const result = scanForSensitiveData(text, source);
+  let raised = 0;
   for (const det of result.detections) {
     logAlert(det, source, sessionId);
+    raised++;
   }
+  return raised;
+}
+
+// Dedupe guard so repeated polls don't re-alert on the same output blob.
+const seenResultHashes = new Set<string>();
+function scanResult(result: unknown, source: string, sessionId?: string): number {
+  if (result === null || result === undefined) return 0;
+  const text = typeof result === "string" ? result : JSON.stringify(result);
+  if (!text || text.length < 3) return 0;
+  // Lightweight 32-bit hash of the output so the same blob (e.g. re-read
+  // receipts) only alerts once per daemon lifetime.
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+  if (seenResultHashes.has(`${source}:${hash}`)) return 0;
+  seenResultHashes.add(`${source}:${hash}`);
+  return scanText(text, source, sessionId);
 }
 
 // ─── Behavior ledger: per-session model/error-rate tracking ──
@@ -270,11 +288,105 @@ function runOnce() {
   const calls = readReceipts();
   if (calls.length === 0) return;
   const s = summarize(calls);
+
+  // Result-side scanning for receipts from proxied MCP tools + CLI wrapper.
+  // The daemon scans opencode input/output in pollOpenCode; receipts are the
+  // other ingestion path, so their results get the same treatment here.
+  let resultAlerts = 0;
+  for (const c of calls) {
+    if (c.result !== undefined && c.result !== null) {
+      resultAlerts += scanResult(c.result, `tool_result:${c.tool || "?"}`, c.sessionId);
+    }
+  }
+  if (resultAlerts > 0) {
+    console.error(`[tooloftruth:daemon] ⚠ ${resultAlerts} result-side detection(s)`);
+  }
   writeSummary(s);
+
   if (s.fabricationsDetected > 0) {
     console.error(`[tooloftruth:daemon] ⚠ ${s.fabricationsDetected} fabrication(s) detected across ${calls.length} calls`);
   } else {
     console.error(`[tooloftruth:daemon] ${calls.length} calls seen, 0 fabrications, $${s.totalCostUsd.toFixed(4)}`);
+  }
+
+  // Budget enforcement — daily spend limit. Crosses once per day (deduped).
+  const crossing = checkBudgetCrossing(TOOLOFTRUTH_DIR);
+  if (crossing) {
+    console.error(`[tooloftruth:daemon] ⚠ BUDGET ${crossing.detail}`);
+    logBudgetAlert(crossing.detail, crossing.status.crossed);
+  }
+
+  // Cost alerts — daily spike, per-call cost, unusual tool patterns.
+  // Reads per-call/weekly limits if configured in the budget block.
+  const budgetCfg = loadBudgetConfig(TOOLOFTRUTH_DIR);
+  if (budgetCfg && (budgetCfg.perCallLimitUsd || budgetCfg.weeklyLimitUsd || calls.length > 0)) {
+    const costAlerts = checkCostAlerts(calls, {
+      dailyLimitUsd: budgetCfg.dailyLimitUsd || undefined,
+      perCallLimitUsd: budgetCfg.perCallLimitUsd || undefined,
+      weeklyLimitUsd: budgetCfg.weeklyLimitUsd || undefined,
+    });
+    for (const a of costAlerts) {
+      logCostAlert(a.type, a.severity, a.message);
+    }
+  }
+}
+
+function logCostAlert(type: string, severity: "info" | "warning" | "critical", message: string) {
+  const now = new Date().toISOString();
+  const entry = {
+    id: `cost_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    timestamp: now,
+    severity,
+    category: "cost" as const,
+    rule: type,
+    match: message,
+    matchRedacted: message.slice(0, 120),
+    confidence: 1,
+    requiresReview: false,
+    source: "daemon:cost",
+    sourceDetail: message,
+    sessionId: undefined,
+  };
+  appendFileSync(alertsFile(), JSON.stringify(entry) + "\n");
+  if (severity === "critical" || severity === "warning") {
+    console.error(`[tooloftruth:daemon] ${severity === "critical" ? "🔴" : "🟡"} COST ${message}`);
+  }
+}
+
+function logBudgetAlert(detail: string, crossed: boolean) {
+  const alertEntry = {
+    id: `budget_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    timestamp: new Date().toISOString(),
+    severity: "warning" as const,
+    category: "budget" as const,
+    rule: "daily_limit_crossed",
+    match: detail,
+    matchRedacted: detail.slice(0, 120),
+    start: 0,
+    end: detail.length,
+    source: "daemon:budget",
+    confidence: 1,
+    requiresReview: false,
+    context: "Daily budget limit crossed — see /api/budget for live spend",
+  };
+  const entry = {
+    id: alertEntry.id,
+    timestamp: alertEntry.timestamp,
+    severity: alertEntry.severity,
+    category: alertEntry.category,
+    rule: alertEntry.rule,
+    match: alertEntry.match,
+    matchRedacted: alertEntry.matchRedacted,
+    confidence: alertEntry.confidence,
+    requiresReview: alertEntry.requiresReview,
+    source: alertEntry.source,
+    sourceDetail: detail,
+    sessionId: undefined,
+  };
+  appendFileSync(alertsFile(), JSON.stringify(entry) + "\n");
+  const cfg = loadAlertConfig(TOOLOFTRUTH_DIR);
+  if (shouldNotify(cfg, "warning")) {
+    notifySystem("Tool of Truth: budget", `WARNING — ${detail}`);
   }
 }
 
@@ -363,6 +475,13 @@ async function pollOpenCode() {
         scanText(msg.text, `message:${msg.id}`, msg.sessionId);
       }
 
+      // Result-side scanning: assistant output may echo a secret the model
+      // read, or follow an injected instruction. Scan every message's text —
+      // especially assistant/system — for secrets, PII, and injection.
+      if (msg.text && msg.role !== "user") {
+        scanResult(msg.text, `message_result:${msg.id}`, msg.sessionId);
+      }
+
       // Also log tool calls as receipts so fabrication audit covers them
       for (const tc of msg.toolCalls) {
         const date = new Date().toISOString().slice(0, 10);
@@ -393,6 +512,12 @@ async function pollOpenCode() {
         // Scan tool call input (args/commands) for sensitive data + dangerous commands
         if (tc.input) {
           scanText(JSON.stringify(tc.input), `tool:${tc.tool}`, msg.sessionId);
+
+          // Result-side: the tool's OUTPUT is the biggest leak vector — a tool
+          // that read a .env returns the key, or a command echoes it. Scan it.
+          if (tc.outputPreview) {
+            scanResult(tc.outputPreview, `tool_result:${tc.tool}`, msg.sessionId);
+          }
 
           // Filesystem actions: installs, writes, deletes, duplications
           const command =

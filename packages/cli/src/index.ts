@@ -11,6 +11,7 @@ import { homedir } from "os";
 import { fileURLToPath } from "url";
 import { startDashboardServer } from "./dashboard-server.js";
 import { loadAlertConfig, updateAlertConfig, formatAlertConfig } from "@tooloftruth/core";
+import { loadBudgetConfig, formatBudgetConfig, setBudgetLimit, computeBudgetStatus, formatBudgetStatus } from "@tooloftruth/core";
 
 const BASE_DIR = join(homedir(), ".tooloftruth");
 const RECEIPTS_DIR = join(BASE_DIR, "receipts");
@@ -168,6 +169,26 @@ function main() {
     process.exit(0);
   }
 
+  // `tooloftruth budget` — view/set daily spend budget
+  if (command === "budget") {
+    const TOOLOFTRUTH_DIR = join(homedir(), ".tooloftruth");
+    const action = commandArgs[0]; // status | set | get
+    const amount = Number(commandArgs[1]);
+
+    if (action === "set" && !isNaN(amount)) {
+      const cfg = setBudgetLimit(amount, TOOLOFTRUTH_DIR);
+      console.log(`Budget set.\n\n${formatBudgetConfig(cfg)}\n\n${formatBudgetStatus(computeBudgetStatus(TOOLOFTRUTH_DIR))}`);
+    } else if (action === "status") {
+      console.log(formatBudgetStatus(computeBudgetStatus(TOOLOFTRUTH_DIR)));
+    } else if (action === "set") {
+      console.error("Usage: tooloftruth budget set <dailyLimitUsd>");
+      process.exit(1);
+    } else {
+      console.log(`${formatBudgetConfig(loadBudgetConfig(TOOLOFTRUTH_DIR))}\n\n${formatBudgetStatus(computeBudgetStatus(TOOLOFTRUTH_DIR))}`);
+    }
+    process.exit(0);
+  }
+
   // `tooloftruth dashboard` — start the local dashboard server
   if (command === "dashboard") {
     const port = Number(commandArgs[0] || process.env.TOOLOFTRUTH_PORT || 4321);
@@ -185,6 +206,8 @@ function main() {
     console.log("Commands:");
     console.log("  tooloftruth status              Show daemon health, receipts, cost");
     console.log("  tooloftruth dashboard [port]    Open the local dashboard (default :4321)");
+    console.log("  tooloftruth budget [status|set]  View or set the daily spend budget");
+    console.log("  tooloftruth alerts <on|off>      Toggle alert categories");
     console.log("  tooloftruth-run -- <command>    Wrap a CLI command and record it");
     console.log("");
     console.log("Examples:");

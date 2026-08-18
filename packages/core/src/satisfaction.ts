@@ -1,7 +1,22 @@
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
+
 export interface SatisfactionResult {
   satisfied: boolean | null; // null = unknown, true = satisfied, false = dissatisfied
   confidence: number;
   signals: string[];
+}
+
+// Persisted satisfaction record — enriched with the call context so the
+// insights module can correlate satisfaction by tool/model/session.
+export interface SatisfactionRecord extends SatisfactionResult {
+  toolCallId: string;
+  timestamp: string;
+  sessionId?: string;
+  tool?: string;
+  server?: string;
+  model?: string;
 }
 
 const POSITIVE_PATTERNS = [
@@ -128,4 +143,33 @@ export class SatisfactionTracker {
   getAllResults(): Map<string, SatisfactionResult> {
     return new Map(this.results);
   }
+}
+
+// ─── Persistence ──────────────────────────────────────────────
+// Satisfaction verdicts are written to ~/.tooloftruth/satisfaction/<date>.jsonl
+// so the behavior-insights module can correlate them by tool/model/session.
+
+function satisfactionDir(tooloftruthDir?: string): string {
+  return join(tooloftruthDir || join(homedir(), ".tooloftruth"), "satisfaction");
+}
+
+export function persistSatisfaction(record: SatisfactionRecord, tooloftruthDir?: string): void {
+  const dir = satisfactionDir(tooloftruthDir);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const date = record.timestamp.slice(0, 10);
+  appendFileSync(join(dir, `${date}.jsonl`), JSON.stringify(record) + "\n");
+}
+
+export function readSatisfactionRecords(tooloftruthDir?: string): SatisfactionRecord[] {
+  const dir = satisfactionDir(tooloftruthDir);
+  if (!existsSync(dir)) return [];
+  const out: SatisfactionRecord[] = [];
+  const files = readdirSync(dir).filter((f) => f.endsWith(".jsonl")).sort().reverse();
+  for (const f of files) {
+    const lines = readFileSync(join(dir, f), "utf-8").split("\n").filter(Boolean);
+    for (const line of lines) {
+      try { out.push(JSON.parse(line) as SatisfactionRecord); } catch { /* skip */ }
+    }
+  }
+  return out;
 }

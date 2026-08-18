@@ -51,8 +51,10 @@ export type { OutcomeResult } from "./fabrication.js";
 export {
   inferSatisfaction,
   SatisfactionTracker,
+  persistSatisfaction,
+  readSatisfactionRecords,
 } from "./satisfaction.js";
-export type { SatisfactionResult } from "./satisfaction.js";
+export type { SatisfactionResult, SatisfactionRecord } from "./satisfaction.js";
 export {
   calculateReliability,
   formatReliability,
@@ -141,3 +143,43 @@ export type {
   AlertCategory,
   SetAlertConfigInput,
 } from "./alert-config.js";
+export {
+  defaultBudgetConfig,
+  loadBudgetConfig,
+  saveBudgetConfig,
+  setBudgetLimit,
+  setBudgetAction,
+  setPerCallLimit,
+  setWeeklyLimit,
+  formatBudgetConfig,
+  computeBudgetStatus,
+  formatBudgetStatus,
+  checkBudgetCrossing,
+  readAllLedgerSessions,
+} from "./budget.js";
+export type {
+  BudgetConfig,
+  BudgetStatus,
+} from "./budget.js";
+export {
+  checkCostAlerts,
+  shouldBlockCall,
+  formatAlerts,
+} from "./alerts.js";
+export type {
+  CostAlert,
+  BudgetConfig as CostBudgetConfig,
+} from "./alerts.js";
+export {
+  computeBehaviorInsights,
+  formatBehaviorInsights,
+} from "./behavior-insights.js";
+export type {
+  BehaviorInsights,
+  SessionInsight,
+  ModelProfile,
+  ToolSatisfaction,
+  RetryLoopInfo,
+  HourlyEfficiency,
+  CrossModelComparison,
+} from "./behavior-insights.js";

@@ -335,6 +335,21 @@ server.tool(
 
     const result = satisfaction.inferFromNextMessage(callId, message);
 
+    // Persist so behavior-insights can correlate satisfaction by tool/model.
+    const call = sessionCalls.find((c) => c.id === callId);
+    const { persistSatisfaction } = await import("@tooloftruth/core");
+    persistSatisfaction({
+      toolCallId: callId,
+      timestamp: new Date().toISOString(),
+      sessionId: sessionId,
+      tool: call?.tool,
+      server: call?.server,
+      model: undefined,
+      satisfied: result.satisfied,
+      confidence: result.confidence,
+      signals: result.signals,
+    }, TOOLOFTRUTH_DIR);
+
     return {
       content: [
         {
@@ -697,6 +712,42 @@ server.tool(
 );
 
 server.tool(
+  "tooloftruth_insights",
+  "Model behavior insights: regression flags, per-model error rates, token/cost drift",
+  {},
+  async () => {
+    const { computeBehaviorInsights, formatBehaviorInsights } = await import("@tooloftruth/core");
+    const insights = computeBehaviorInsights(TOOLOFTRUTH_DIR);
+    return {
+      content: [{ type: "text" as const, text: formatBehaviorInsights(insights) }],
+    };
+  }
+);
+
+server.tool(
+  "tooloftruth_budget",
+  "View or set the daily spend budget — when crossed, the daemon flags it",
+  {
+    action: z.enum(["get", "set", "status"]).default("get").describe("get=view config, status=live spend, set=set daily limit"),
+    dailyLimitUsd: z.number().min(0).optional().describe("Daily budget in USD (0 disables)"),
+  },
+  async ({ action, dailyLimitUsd }) => {
+    const { loadBudgetConfig, formatBudgetConfig, setBudgetLimit, computeBudgetStatus, formatBudgetStatus } = await import("@tooloftruth/core");
+    const dir = TOOLOFTRUTH_DIR;
+    if (action === "set") {
+      const cfg = setBudgetLimit(dailyLimitUsd ?? 0, dir);
+      return {
+        content: [{ type: "text" as const, text: `Budget set.\n\n${formatBudgetConfig(cfg)}\n\n${formatBudgetStatus(computeBudgetStatus(dir))}` }],
+      };
+    }
+    if (action === "status") {
+      return { content: [{ type: "text" as const, text: formatBudgetStatus(computeBudgetStatus(dir)) }] };
+    }
+    return { content: [{ type: "text" as const, text: formatBudgetConfig(loadBudgetConfig(dir)) }] };
+  }
+);
+
+server.tool(
   "tooloftruth_alert_config",
   "View or update alert configuration — which detection types produce alerts",
   {
@@ -1000,7 +1051,28 @@ async function registerProxyTools(): Promise<void> {
             ? (result as { content: unknown }).content
             : [{ type: "text" as const, text: JSON.stringify(result, null, 2) }];
 
-        return { content };
+        // ─── Verify-my-own-claim: append a self-check proof block ─────
+        // Every proxied call returns with its verification inline, so the
+        // conversation itself is the receipt. An agent (or human) can pass the
+        // call id to tooloftruth_verify to re-confirm against the ledger.
+        const proof = [
+          "",
+          "```proof",
+          `verified:  ${record.verification.verdict === "VERIFIED" ? "yes" : "no"}`,
+          `call:      ${record.id}`,
+          `tool:      ${record.server}__${record.tool}`,
+          `verdict:   ${record.verification.verdict}`,
+          `trust:     ${record.verification.trustScore}/100`,
+          `fabricationConfidence: ${Math.round(record.verification.fabricationConfidence * 100)}%`,
+          `duration:  ${record.durationMs}ms`,
+          `cost:      $${record.costUsd.toFixed(4)}`,
+          `checks:    ${record.verification.checksPerformed.join(", ")}`,
+          "verify:    call `tooloftruth_verify` with tool=\"" + tool.originalName + "\" to re-confirm",
+          "```",
+        ].join("\n");
+
+        const base = Array.isArray(content) ? (content as any[]).slice() : [{ type: "text" as const, text: String(content) }];
+        return { content: [...base, { type: "text" as const, text: proof }] };
       }
     );
   }
